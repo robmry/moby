@@ -1,38 +1,45 @@
 ### Debugging the daemon
 
-The Docker daemon inside the development container can be debugged with [Delve](https://github.com/go-delve/delve).
-
-Delve debugger listens on a port, which has to be exposed outside the development container.
-Also, in order to be able to debug the daemon, it has to be compiled with the debugging symbols.
-This can be done by launching the development container with the following command:
-
-```bash
-$ make BIND_DIR=. DOCKER_DEBUG=1 DELVE_PORT=127.0.0.1:2345:2345 shell
-```
-
-The `DOCKER_DEBUG` variable disables build optimizations, allowing to debug the binary,
-while `DELVE_PORT` publishes the specified port for use with the debugger.
-
-The `DELVE_PORT` variable accepts the port in the same format as Docker CLI's `--publish` (`-p`) option.
-This means that the port can be published in multiple ways:
-
-1. `DELVE_PORT=127.0.0.1:2345:2345` - exposes debugger on port `2345` for local development only (recommended)
-2. `DELVE_PORT=2345:2345` - exposes debugger on port `2345` without binding to specific IP
-3. `DELVE_PORT=2345` - same as above
-
-**IMPORTANT:** Publishing the port without binding it to localhost (127.0.0.1) might expose the debugger
-outside the developer's machine and is not recommended.
+The Docker daemon and test executables inside the development container can be debugged with [Delve](https://github.com/go-delve/delve).
 
 ## Running Docker daemon with debugger attached
 
-1. Run development container with build optimizations disabled (ie. `DOCKER_DEBUG=1`) and Delve enabled:
+1. Change directory, to the root of your Docker repository.
+
+    ```bash
+    $ cd moby-fork
+    ```
+
+2. Run a development container:
    ```bash
    $ make BIND_DIR=. DOCKER_DEBUG=1 DELVE_PORT=127.0.0.1:2345:2345 shell
    ```
-2. Inside the development container:
+   If you are running Docker Desktop on macOS or Windows, the overlay storage driver will not work
+   inside the development container. To use the `vfs` driver, add `DOCKER_GRAPHDRIVER=`. For example:
+   ```bash
+   $ make BIND_DIR=. DOCKER_GRAPHDRIVER= DOCKER_DEBUG=1 DELVE_PORT=127.0.0.1:2345:2345 shell
+   ```
+   
+   The `BIND_DIR` variable makes your local source code directory available inside the container.
+
+   The `DOCKER_DEBUG` variable disables build optimizations, creating a debuggable binary.
+
+   The Delve backend server listens on a port that needs to be exposed outside the container. It
+   is configured using the `DELVE_PORT` environment variable. `DELVE_PORT` accepts the port in
+   the same format as Docker CLI's `--publish` (`-p`) option. This means the port can be
+   published in multiple ways:
+
+   - `DELVE_PORT=127.0.0.1:2345:2345` - exposes the debugger on port `2345` for local development only (recommended).
+   - `DELVE_PORT=2345:2345` - exposes the debugger on port `2345`, without binding to specific IP.
+   - `DELVE_PORT=2345` - same as above.
+
+   > **IMPORTANT:** Publishing the port without binding it to localhost (127.0.0.1) might expose
+   the debugger outside the developer's machine and is not recommended.
+
+3. Inside the development container:
    1. Build the Docker daemon:
       ```bash
-      $ ./hack/make.sh binary
+      $ ./hack/make.sh binary-daemon
       ```
    2. Install the newly-built daemon:
       ```bash
@@ -53,7 +60,12 @@ outside the developer's machine and is not recommended.
    ```bash
    $ make BIND_DIR=. DOCKER_DEBUG=1 DELVE_PORT=127.0.0.1:2345:2345 shell
    ```
-
+   If you are running Docker Desktop on macOS or Windows, the overlay storage driver will not work
+   inside the development container. To use the `vfs` driver, add `DOCKER_GRAPHDRIVER=`. For example:
+   ```bash
+   $ make BIND_DIR=. DOCKER_GRAPHDRIVER= DOCKER_DEBUG=1 DELVE_PORT=127.0.0.1:2345:2345 shell
+   ```
+   
 2. Inside the development container, run the integration test you want through the `make.sh` script:
 
    ```bash
@@ -65,6 +77,8 @@ outside the developer's machine and is not recommended.
    The execution will pause and wait for the IDE or Delve CLI to attach
    to the port, specified with the `DELVE_PORT` variable.
    Once the IDE or Delve CLI is attached, the test execution will start.
+
+   > **Note:** The debugger attaches to the test executable, not to the Docker daemon the test starts.
 
 ## Debugging from IDE (on example of GoLand 2021.3)
 

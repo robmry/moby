@@ -121,6 +121,12 @@ can take over 15 minutes to complete.
    ```none
    $ make BIND_DIR=. shell
    ```
+   
+   If you are running Docker Desktop on macOS or Windows, the overlay storage driver will not work
+   inside the development container. To use the `vfs` driver, add `DOCKER_GRAPHDRIVER=`. For example:
+   ```bash
+   $ make BIND_DIR=. DOCKER_GRAPHDRIVER= shell
+   ```
 
    Using the instructions in the
    `Dockerfile`, the build may need to download and / or configure source and other images. On first build this process may take between 5 - 15 minutes to create an image. The command returns informational messages as it runs.  A
@@ -128,9 +134,9 @@ can take over 15 minutes to complete.
    container.
 
    ```none
-   Successfully built 3d872560918e
-   Successfully tagged docker-dev:dry-run-test
-   docker run --rm -i --privileged -e BUILDFLAGS -e KEEPBUNDLE -e DOCKER_BUILD_GOGC -e DOCKER_BUILD_PKGS -e DOCKER_CLIENTONLY -e DOCKER_DEBUG -e DOCKER_EXPERIMENTAL -e DOCKER_GITCOMMIT -e DOCKER_GRAPHDRIVER=vfs -e DOCKER_REMAP_ROOT -e DOCKER_STORAGE_OPTS -e DOCKER_USERLANDPROXY -e TESTDIRS -e TESTFLAGS -e TIMEOUT -v "home/ubuntu/repos/docker/bundles:/go/src/github.com/docker/docker/bundles" -t "docker-dev:dry-run-test" bash
+   => => writing image sha256:068c531f0a2bf99c57593322a704e1ff892fb4ed759c33fc34b4ac50992a72ae                                                                                    0.0s
+   => => naming to docker.io/library/docker-dev  
+   docker run --rm --privileged  -e BUILDFLAGS -e KEEPBUNDLE [-e ...] -v "/Users/mary/go/src/github.com/moxiegirl/moby-fork/.:/go/src/github.com/docker/docker/." -v "/Users/mary/go/src/github.com/moxiegirl/moby-fork/.git:/go/src/github.com/docker/docker/.git" -v docker-dev-cache:/root/.cache -v docker-mod-cache:/go/pkg/mod/     -t -i "docker-dev" bash
    #
    ```
 
@@ -236,6 +242,8 @@ can take over 15 minutes to complete.
    # docker --version
    Docker version 17.09.0-dev, build 
    ```
+   Add `DOCKER_GRAPHDRIVER=` if you are running in an environment that does not support the
+   overlay storage driver in the development container.
 
     This Docker CLI should be built from the [docker-cli
     project](https://github.com/docker/cli) and needs to be a Linux
@@ -265,12 +273,9 @@ can take over 15 minutes to complete.
 
     ```none
     ubuntu@ubuntu1404:~$ docker ps
-    CONTAINER ID        IMAGE                     COMMAND             CREATED             STATUS              PORTS               NAMES
-    a8b2885ab900        docker-dev:dry-run-test   "hack/dind bash"    43 minutes ago      Up 43 minutes                           hungry_payne
+    CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+    a8b2885ab900        docker-dev:latest   "hack/dind bash"    43 minutes ago      Up 43 minutes                           hungry_payne
     ```
-
-    Notice that the tag on the container is marked with the `dry-run-test` branch name.
-
 
 ## Task 3. Make a code change
 

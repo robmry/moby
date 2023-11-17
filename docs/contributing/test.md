@@ -106,12 +106,13 @@ Try this now.
 1.  Open a terminal and change to the `moby-fork` root.
 
 2.  Start a Moby development image.
-
-    If you are following along with this guide, you should have a
-    `docker-dev:dry-run-test` image.
-
+    ```none
+    $ make BIND_DIR=. shell
+    ```
+    If you are running Docker Desktop on macOS or Windows, the overlay storage driver will not work
+    inside the development container. To use the `vfs` driver, add `DOCKER_GRAPHDRIVER=`. For example:
     ```bash
-    $ docker run --privileged --rm -ti -v `pwd`:/go/src/github.com/docker/docker docker-dev:dry-run-test /bin/bash
+    $ make BIND_DIR=. DOCKER_GRAPHDRIVER= shell
     ```
 
 3.  Run the unit tests using the `hack/test/unit` script.
@@ -180,7 +181,16 @@ $ TESTFLAGS='-test.run TestDockerCLIBuildSuite' make test-integration
 To run the same test inside your Docker development container, you do this:
 
 ```bash
-# TESTFLAGS='-test.run TestDockerCLIBuildSuite' hack/make.sh binary test-integration
+$ TESTFLAGS='-test.run TestDockerCLIBuildSuite' hack/make.sh binary test-integration
+```
+
+To speed things up, use `TEST_INTEGRATION_DIR=<path>` to say which test binary
+is needed. For example:
+
+```bash
+$ TEST_INTEGRATION_DIR=./integration/networking \
+   TESTFLAGS='-test.run TestBridgeICC' \
+   ./hack/make.sh dynbinary test-integration
 ```
 
 ## Test the Windows binary against a Linux daemon

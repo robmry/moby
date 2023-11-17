@@ -33,4 +33,4 @@ it has to be configured in the settings as well:
 ## Where to go next
 
 Congratulations, you have finished configuring project to work with the IDE. 
-In the next section you'll [learn how to set up and work in a Moby development container](set-up-dev-env.md).
+In the next section you'll [Configure Git for contributing](set-up-git.md).
