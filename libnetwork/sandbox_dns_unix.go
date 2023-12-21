@@ -24,16 +24,20 @@ const (
 	dirPerm       = 0o755
 	filePerm      = 0o644
 
-	resolverIPSandbox = "127.0.0.11"
+	resolverIPSandbox   = "127.0.0.11"
+	resolverIPv6Sandbox = "fe81:2345:6789:abcd::1"
 )
 
 func (sb *Sandbox) startResolver(restore bool) {
 	sb.resolverOnce.Do(func() {
 		var err error
+
+		// TODO(robmry) - select resolverIPv6Sandbox or resolverIPSandbox
+
 		// The embedded resolver is always started with proxyDNS set as true, even when the sandbox is only attached to
 		// an internal network. This way, it's the driver responsibility to make sure `connect` syscall fails fast when
 		// no external connectivity is available (eg. by not setting a default gateway).
-		sb.resolver = NewResolver(resolverIPSandbox, true, sb)
+		sb.resolver = NewResolver(resolverIPv6Sandbox, true, sb)
 		defer func() {
 			if err != nil {
 				sb.resolver = nil
@@ -52,6 +56,12 @@ func (sb *Sandbox) startResolver(restore bool) {
 			}
 		}
 		sb.resolver.SetExtServers(sb.extDNS)
+
+		// TODO(robmry) - make this conditional on not-having IPv4.
+		dnsIP := &net.IPNet{IP: net.ParseIP(resolverIPv6Sandbox), Mask: net.CIDRMask(128, 128)}
+		if err := sb.osSbox.AddAliasIP(sb.osSbox.GetLoopbackIfaceName(), dnsIP); err != nil {
+			log.G(context.TODO()).WithError(err).Errorf("failed to add DNS ip %v to loopback", dnsIP)
+		}
 
 		if err = sb.osSbox.InvokeFunc(sb.resolver.SetupFunc(0)); err != nil {
 			log.G(context.TODO()).Errorf("Resolver Setup function failed for container %s, %q", sb.ContainerID(), err)
@@ -405,8 +415,7 @@ dnsOpt:
 	}
 
 	var (
-		// external v6 DNS servers have to be listed in resolv.conf
-		dnsList       = append([]string{sb.resolver.NameServer()}, resolvconf.GetNameservers(currRC, resolvconf.IPv6)...)
+		dnsList       = []string{sb.resolver.NameServer()}
 		dnsSearchList = resolvconf.GetSearchDomains(currRC)
 	)
 

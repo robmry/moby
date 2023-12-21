@@ -244,10 +244,6 @@ func (sb *Sandbox) populateNetworkResources(ep *Endpoint) error {
 	lbModeIsDSR := ep.network.loadBalancerMode == loadBalancerModeDSR
 	ep.mu.Unlock()
 
-	if ep.needResolver() {
-		sb.startResolver(false)
-	}
-
 	if i != nil && i.srcName != "" {
 		var ifaceOptions []osl.IfaceOption
 
@@ -277,6 +273,10 @@ func (sb *Sandbox) populateNetworkResources(ep *Endpoint) error {
 				return fmt.Errorf("failed to add virtual ip %v to loopback: %v", ipNet, err)
 			}
 		}
+	}
+
+	if ep.needResolver() {
+		sb.startResolver(false)
 	}
 
 	if joinInfo != nil {

@@ -16,25 +16,35 @@ const (
 	postroutingChain = "DOCKER_POSTROUTING"
 )
 
+func (r *Resolver) listenZoneId(prefix string) string {
+	if r.listenIPv6 {
+		return prefix + "lo"
+	}
+	return ""
+}
+
 func (r *Resolver) setupIPTable() error {
 	if r.err != nil {
 		return r.err
 	}
-	laddr := r.conn.LocalAddr().String()
-	ltcpaddr := r.tcpListen.Addr().String()
-	resolverIP, ipPort, _ := net.SplitHostPort(laddr)
-	_, tcpPort, _ := net.SplitHostPort(ltcpaddr)
+	resolverIP := r.listenAddress
+	_, listenPortUDP, _ := net.SplitHostPort(r.conn.LocalAddr().String())
+	_, listenPortTCP, _ := net.SplitHostPort(r.tcpListen.Addr().String())
 	rules := [][]string{
-		{"-t", "nat", "-I", outputChain, "-d", resolverIP, "-p", "udp", "--dport", dnsPort, "-j", "DNAT", "--to-destination", laddr},
-		{"-t", "nat", "-I", postroutingChain, "-s", resolverIP, "-p", "udp", "--sport", ipPort, "-j", "SNAT", "--to-source", ":" + dnsPort},
-		{"-t", "nat", "-I", outputChain, "-d", resolverIP, "-p", "tcp", "--dport", dnsPort, "-j", "DNAT", "--to-destination", ltcpaddr},
-		{"-t", "nat", "-I", postroutingChain, "-s", resolverIP, "-p", "tcp", "--sport", tcpPort, "-j", "SNAT", "--to-source", ":" + dnsPort},
+		{"-t", "nat", "-I", outputChain, "-d", resolverIP, "-p", "udp", "--dport", dnsPort, "-j", "DNAT", "--to-destination", ":" + listenPortUDP},
+		{"-t", "nat", "-I", postroutingChain, "-s", resolverIP, "-p", "udp", "--sport", listenPortUDP, "-j", "SNAT", "--to-source", ":" + dnsPort},
+		{"-t", "nat", "-I", outputChain, "-d", resolverIP, "-p", "tcp", "--dport", dnsPort, "-j", "DNAT", "--to-destination", ":" + listenPortTCP},
+		{"-t", "nat", "-I", postroutingChain, "-s", resolverIP, "-p", "tcp", "--sport", listenPortTCP, "-j", "SNAT", "--to-source", ":" + dnsPort},
 	}
 
 	var setupErr error
 	err := r.backend.ExecFunc(func() {
-		// TODO IPv6 support
-		iptable := iptables.GetIptable(iptables.IPv4)
+		var iptable *iptables.IPTable
+		if r.listenIPv6 {
+			iptable = iptables.GetIptable(iptables.IPv6)
+		} else {
+			iptable = iptables.GetIptable(iptables.IPv4)
+		}
 
 		// insert outputChain and postroutingchain
 		if iptable.ExistsNative("nat", "OUTPUT", "-d", resolverIP, "-j", outputChain) {
@@ -70,8 +80,8 @@ func (r *Resolver) setupIPTable() error {
 		}
 
 		for _, rule := range rules {
-			if iptable.RawCombinedOutputNative(rule...) != nil {
-				setupErr = fmt.Errorf("set up rule failed, %v", rule)
+			if err := iptable.RawCombinedOutputNative(rule...); err != nil {
+				setupErr = fmt.Errorf("set up rule failed, %v, %w", rule, err)
 				return
 			}
 		}

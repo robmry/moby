@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +69,7 @@ type extDNSEntry struct {
 // the container's loopback interface for DNS queries.
 type Resolver struct {
 	backend       DNSBackend
+	listenIPv6    bool
 	extDNSList    [maxExtDNS]extDNSEntry
 	server        *dns.Server
 	conn          *net.UDPConn
@@ -85,8 +87,10 @@ type Resolver struct {
 
 // NewResolver creates a new instance of the Resolver
 func NewResolver(address string, proxyDNS bool, backend DNSBackend) *Resolver {
+	addr, _ := netip.ParseAddr(address)
 	return &Resolver{
 		backend:       backend,
+		listenIPv6:    !addr.Is4(),
 		proxyDNS:      proxyDNS,
 		listenAddress: address,
 		err:           fmt.Errorf("setup not done yet"),
@@ -113,6 +117,7 @@ func (r *Resolver) SetupFunc(port int) func() {
 		r.conn, err = net.ListenUDP("udp", &net.UDPAddr{
 			IP:   net.ParseIP(r.listenAddress),
 			Port: port,
+			Zone: r.listenZoneId(""),
 		})
 		if err != nil {
 			r.err = fmt.Errorf("error in opening name server socket %v", err)
@@ -123,6 +128,7 @@ func (r *Resolver) SetupFunc(port int) func() {
 		r.tcpListen, err = net.ListenTCP("tcp", &net.TCPAddr{
 			IP:   net.ParseIP(r.listenAddress),
 			Port: port,
+			Zone: r.listenZoneId(""),
 		})
 		if err != nil {
 			r.err = fmt.Errorf("error in opening name TCP server socket %v", err)
@@ -194,9 +200,9 @@ func (r *Resolver) SetExtServers(extDNS []extDNSEntry) {
 	}
 }
 
-// NameServer returns the IP of the DNS resolver for the containers.
+// NameServer returns the IP of the DNS resolver for the containers, with an IPv6 zone identifier if required.
 func (r *Resolver) NameServer() string {
-	return r.listenAddress
+	return r.listenAddress + r.listenZoneId("%")
 }
 
 // ResolverOptions returns resolv.conf options that should be set.
