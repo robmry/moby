@@ -1185,7 +1185,14 @@ func (n *Network) createEndpoint(name string, sb *Sandbox, options ...EndpointOp
 		ep.ipamOptions[netlabel.MacAddress] = ep.iface.mac.String()
 	}
 
-	if err = ep.assignAddress(ipam, true, n.enableIPv6 && !n.postIPv6); err != nil {
+	wantIPv6 := n.enableIPv6
+	if wantIPv6 && sb != nil {
+		if sbIPv6, ok := sb.IPv6Enabled(); ok && !sbIPv6 {
+			wantIPv6 = false
+		}
+	}
+
+	if err = ep.assignAddress(ipam, true, wantIPv6 && !n.postIPv6); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -1218,8 +1225,12 @@ func (n *Network) createEndpoint(name string, sb *Sandbox, options ...EndpointOp
 		}
 	}()
 
-	if err = ep.assignAddress(ipam, false, n.enableIPv6 && n.postIPv6); err != nil {
-		return nil, err
+	if wantIPv6 {
+		if err = ep.assignAddress(ipam, false, n.postIPv6); err != nil {
+			return nil, err
+		}
+	} else {
+		ep.iface.addrv6 = nil
 	}
 
 	if !n.getController().isSwarmNode() || n.Scope() != scope.Swarm || !n.driverIsMultihost() {
@@ -1972,13 +1983,11 @@ func (n *Network) ResolveName(ctx context.Context, req string, ipType int) ([]ne
 	ipSet, ok := sr.svcMap.Get(req)
 
 	if ipType == types.IPv6 {
-		// If the name resolved to v4 address then its a valid name in
-		// the docker network domain. If the network is not v6 enabled
-		// set ipv6Miss to filter the DNS query from going to external
-		// resolvers.
-		if ok && !n.enableIPv6 {
-			ipv6Miss = true
-		}
+		// If the name resolved to v4 addresses then it's a valid name in the docker
+		// network domain. If there is no v6 address, because the network or the
+		// container is not v6 enabled, set ipv6Miss to stop the DNS query from going to
+		// external nameservers.
+		ipv6Miss = ok
 		ipSet, ok = sr.svcIPv6Map.Get(req)
 	}
 
@@ -1992,6 +2001,7 @@ func (n *Network) ResolveName(ctx context.Context, req string, ipType int) ([]ne
 				ipLocal = append(ipLocal, net.ParseIP(ip.ip))
 			}
 		}
+		// TODO(robmry) - the bool return is 'ipv6Miss', it should be 'false' here.
 		return ipLocal, ok
 	}
 

@@ -35,3 +35,9 @@ func (sb *Sandbox) rebuildHostsFile() error {
 	// No hosts file to update on Windows.
 	return nil
 }
+
+func (sb *Sandbox) IPv6Enabled() (enabled, ok bool) {
+	// Not implemented on Windows (Sandbox.osSbox is always nil).
+	// Assume the container supports IPv6, in case there's a Windows IPAM driver that does.
+	return true, true
+}
