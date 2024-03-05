@@ -782,7 +782,7 @@ func (daemon *Daemon) connectToNetwork(cfg *config.Config, container *container.
 	}
 
 	endpointName := strings.TrimPrefix(container.Name, "/")
-	ep, err := n.CreateEndpoint(endpointName, createOptions...)
+	ep, err := n.CreateEndpointForSandbox(endpointName, sb, createOptions...)
 	if err != nil {
 		return err
 	}

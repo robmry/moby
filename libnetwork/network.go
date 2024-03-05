@@ -1115,7 +1115,13 @@ func (n *Network) addEndpoint(ep *Endpoint) error {
 // CreateEndpoint creates a new endpoint to this network symbolically identified by the
 // specified unique name. The options parameter carries driver specific options.
 func (n *Network) CreateEndpoint(name string, options ...EndpointOption) (*Endpoint, error) {
-	var err error
+	return n.CreateEndpointForSandbox(name, nil, options...)
+}
+
+// CreateEndpointForSandbox creates a new endpoint to this network symbolically
+// identified by the specified unique name. The options parameter carries driver
+// specific options. The Endpoint will be configured for sb, but not joined to it.
+func (n *Network) CreateEndpointForSandbox(name string, sb *Sandbox, options ...EndpointOption) (*Endpoint, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, ErrInvalidName(name)
 	}
@@ -1124,17 +1130,17 @@ func (n *Network) CreateEndpoint(name string, options ...EndpointOption) (*Endpo
 		return nil, types.ForbiddenErrorf("cannot create endpoint on configuration-only network")
 	}
 
-	if _, err = n.EndpointByName(name); err == nil {
+	if _, err := n.EndpointByName(name); err == nil {
 		return nil, types.ForbiddenErrorf("endpoint with name %s already exists in network %s", name, n.Name())
 	}
 
 	n.ctrlr.networkLocker.Lock(n.id)
 	defer n.ctrlr.networkLocker.Unlock(n.id) //nolint:errcheck
 
-	return n.createEndpoint(name, options...)
+	return n.createEndpoint(name, sb, options...)
 }
 
-func (n *Network) createEndpoint(name string, options ...EndpointOption) (*Endpoint, error) {
+func (n *Network) createEndpoint(name string, sb *Sandbox, options ...EndpointOption) (*Endpoint, error) {
 	var err error
 
 	ep := &Endpoint{name: name, generic: make(map[string]interface{}), iface: &EndpointInterface{}}
@@ -2159,7 +2165,7 @@ func (n *Network) createLoadBalancerSandbox() (retErr error) {
 		CreateOptionIpam(n.loadBalancerIP, nil, nil, nil),
 		CreateOptionLoadBalancer(),
 	}
-	ep, err := n.createEndpoint(endpointName, epOptions...)
+	ep, err := n.createEndpoint(endpointName, sb, epOptions...)
 	if err != nil {
 		return err
 	}

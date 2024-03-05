@@ -106,12 +106,6 @@ func (iface *lnInterface) init(c *libnetwork.Controller, n *libnetwork.Network) 
 	defer close(iface.ready)
 	id := identity.NewID()
 
-	ep, err := n.CreateEndpoint(id, libnetwork.CreateOptionDisableResolution())
-	if err != nil {
-		iface.err = err
-		return
-	}
-
 	sbx, err := c.NewSandbox(id, libnetwork.OptionUseExternalKey(), libnetwork.OptionHostsPath(filepath.Join(iface.provider.Root, id, "hosts")),
 		libnetwork.OptionResolvConfPath(filepath.Join(iface.provider.Root, id, "resolv.conf")))
 	if err != nil {
@@ -119,6 +113,11 @@ func (iface *lnInterface) init(c *libnetwork.Controller, n *libnetwork.Network) 
 		return
 	}
 
+	ep, err := n.CreateEndpointForSandbox(id, sbx, libnetwork.CreateOptionDisableResolution())
+	if err != nil {
+		iface.err = err
+		return
+	}
 	if err := ep.Join(sbx); err != nil {
 		iface.err = err
 		return
