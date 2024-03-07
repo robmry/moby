@@ -22,6 +22,7 @@ import (
 // NewNetContainer method. The various setter functions of type SandboxOption are
 // provided by libnetwork, they look like ContainerOptionXXXX(...)
 type SandboxOption func(sb *Sandbox)
+type PreJoinSandboxOption SandboxOption
 
 func (sb *Sandbox) processOptions(options ...SandboxOption) {
 	for _, opt := range options {
@@ -273,15 +274,14 @@ func (sb *Sandbox) Refresh(options ...SandboxOption) error {
 	return nil
 }
 
-// AddLegacyLinks is used to configure legacy links, which are only supported by the default bridge network.
-func (sb *Sandbox) AddLegacyLinks(
-	extraHostsOptions []SandboxOption,
-	parentUpdateOptions []SandboxOption,
-	legacyLinksOption SandboxOption,
-) error {
-	sb.processOptions(extraHostsOptions...)
-	sb.processOptions(parentUpdateOptions...)
-	sb.processOptions(legacyLinksOption)
+// ApplyPreJoinOptions applies options that will take effect if applied after
+// Sandbox construction, but before the Join call for an Endpoint requiring them.
+func (sb *Sandbox) ApplyPreJoinOptions(opts []PreJoinSandboxOption) error {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(sb)
+		}
+	}
 	return sb.rebuildHostsFile()
 }
 

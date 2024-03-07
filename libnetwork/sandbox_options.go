@@ -46,12 +46,20 @@ func OptionExtraHost(name string, IP string) SandboxOption {
 	}
 }
 
+func PreJoinOptionExtraHost(name string, IP string) PreJoinSandboxOption {
+	return PreJoinSandboxOption(OptionExtraHost(name, IP))
+}
+
 // OptionParentUpdate function returns an option setter for parent container
 // which needs to update the IP address for the linked container.
 func OptionParentUpdate(cid string, name, ip string) SandboxOption {
 	return func(sb *Sandbox) {
 		sb.config.parentUpdates = append(sb.config.parentUpdates, parentUpdate{cid: cid, name: name, ip: ip})
 	}
+}
+
+func PreJoinOptionParentUpdate(cid string, name, ip string) PreJoinSandboxOption {
+	return PreJoinSandboxOption(OptionParentUpdate(cid, name, ip))
 }
 
 // OptionResolvConfPath function returns an option setter for resolvconfpath option to
@@ -122,6 +130,10 @@ func OptionGeneric(generic map[string]interface{}) SandboxOption {
 			sb.config.generic[k] = v
 		}
 	}
+}
+
+func PreJoinOptionGeneric(generic map[string]interface{}) PreJoinSandboxOption {
+	return PreJoinSandboxOption(OptionGeneric(generic))
 }
 
 // OptionExposedPorts function returns an option setter for the container exposed

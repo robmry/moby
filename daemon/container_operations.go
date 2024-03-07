@@ -181,7 +181,7 @@ func (daemon *Daemon) addLegacyLinks(
 		}
 	}
 
-	var extraHostsOptions []libnetwork.SandboxOption
+	var sbOpts []libnetwork.PreJoinSandboxOption
 	defaultNetName := runconfig.DefaultDaemonNetworkMode().NetworkName()
 	var (
 		childEndpoints []string
@@ -197,10 +197,10 @@ func (daemon *Daemon) addLegacyLinks(
 		}
 		defaultNW := child.NetworkSettings.Networks[defaultNetName]
 		if defaultNW.IPAddress != "" {
-			extraHostsOptions = append(extraHostsOptions, libnetwork.OptionExtraHost(aliasList, defaultNW.IPAddress))
+			sbOpts = append(sbOpts, libnetwork.PreJoinOptionExtraHost(aliasList, defaultNW.IPAddress))
 		}
 		if defaultNW.GlobalIPv6Address != "" {
-			extraHostsOptions = append(extraHostsOptions, libnetwork.OptionExtraHost(aliasList, defaultNW.GlobalIPv6Address))
+			sbOpts = append(sbOpts, libnetwork.PreJoinOptionExtraHost(aliasList, defaultNW.GlobalIPv6Address))
 		}
 		cEndpointID = defaultNW.EndpointID
 		if cEndpointID != "" {
@@ -209,24 +209,23 @@ func (daemon *Daemon) addLegacyLinks(
 	}
 
 	var parentEndpoints []string
-	var parentUpdateOptions []libnetwork.SandboxOption
 	for alias, parent := range parents {
 		_, alias = path.Split(alias)
 		log.G(context.TODO()).Debugf("Update /etc/hosts of %s for alias %s with ip %s", parent.ID, alias, epConfig.IPAddress)
-		parentUpdateOptions = append(parentUpdateOptions, libnetwork.OptionParentUpdate(parent.ID, alias, epConfig.IPAddress))
+		sbOpts = append(sbOpts, libnetwork.PreJoinOptionParentUpdate(parent.ID, alias, epConfig.IPAddress))
 		if cEndpointID != "" {
 			parentEndpoints = append(parentEndpoints, cEndpointID)
 		}
 	}
 
-	legacyLinksOption := libnetwork.OptionGeneric(options.Generic{
+	sbOpts = append(sbOpts, libnetwork.PreJoinOptionGeneric(options.Generic{
 		netlabel.GenericData: options.Generic{
 			"ParentEndpoints": parentEndpoints,
 			"ChildEndpoints":  childEndpoints,
 		},
-	})
+	}))
 
-	return sb.AddLegacyLinks(extraHostsOptions, parentUpdateOptions, legacyLinksOption)
+	return sb.ApplyPreJoinOptions(sbOpts)
 }
 
 func (daemon *Daemon) updateNetworkSettings(container *container.Container, n *libnetwork.Network, endpointConfig *networktypes.EndpointSettings) error {
