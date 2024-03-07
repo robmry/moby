@@ -273,6 +273,18 @@ func (sb *Sandbox) Refresh(options ...SandboxOption) error {
 	return nil
 }
 
+// AddLegacyLinks is used to configure legacy links, which are only supported by the default bridge network.
+func (sb *Sandbox) AddLegacyLinks(
+	extraHostsOptions []SandboxOption,
+	parentUpdateOptions []SandboxOption,
+	legacyLinksOption SandboxOption,
+) error {
+	sb.processOptions(extraHostsOptions...)
+	sb.processOptions(parentUpdateOptions...)
+	sb.processOptions(legacyLinksOption)
+	return sb.rebuildHostsFile()
+}
+
 func (sb *Sandbox) MarshalJSON() ([]byte, error) {
 	sb.mu.Lock()
 	defer sb.mu.Unlock()

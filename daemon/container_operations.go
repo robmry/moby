@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"net"
 	"os"
 	"path"
@@ -152,24 +153,40 @@ func (daemon *Daemon) buildSandboxOptions(cfg *config.Config, container *contain
 	}
 
 	sboxOptions = append(sboxOptions, libnetwork.OptionPortMapping(publishedPorts), libnetwork.OptionExposedPorts(exposedPorts))
+	return sboxOptions, nil
+}
 
-	// Legacy Link feature is supported only for the default bridge network.
-	// return if this call to build join options is not for default bridge network
-	// Legacy Link is only supported by docker run --link
-	defaultNetName := runconfig.DefaultDaemonNetworkMode().NetworkName()
-	bridgeSettings, ok := container.NetworkSettings.Networks[defaultNetName]
-	if !ok || bridgeSettings.EndpointSettings == nil || bridgeSettings.EndpointID == "" {
-		return sboxOptions, nil
+func (daemon *Daemon) addLegacyLinks(
+	cfg *config.Config,
+	ctr *container.Container,
+	epConfig *network.EndpointSettings,
+	sb *libnetwork.Sandbox,
+) error {
+	if epConfig.EndpointID == "" {
+		return nil
 	}
 
+	children := daemon.children(ctr)
+	var parents map[string]*container.Container
+	if !cfg.DisableBridge && ctr.HostConfig.NetworkMode.IsPrivate() {
+		parents = daemon.parents(ctr)
+	}
+	if len(children) == 0 && len(parents) == 0 {
+		return nil
+	}
+	for _, child := range children {
+		if !isLinkable(child) {
+			return fmt.Errorf("Cannot link to %s, as it does not belong to the default network", child.Name)
+		}
+	}
+
+	var extraHostsOptions []libnetwork.SandboxOption
+	defaultNetName := runconfig.DefaultDaemonNetworkMode().NetworkName()
 	var (
 		childEndpoints []string
 		cEndpointID    string
 	)
-	for linkAlias, child := range daemon.children(container) {
-		if !isLinkable(child) {
-			return nil, fmt.Errorf("Cannot link to %s, as it does not belong to the default network", child.Name)
-		}
+	for linkAlias, child := range children {
 		_, alias := path.Split(linkAlias)
 		// allow access to the linked container via the alias, real name, and container hostname
 		aliasList := alias + " " + child.Config.Hostname
@@ -179,10 +196,10 @@ func (daemon *Daemon) buildSandboxOptions(cfg *config.Config, container *contain
 		}
 		defaultNW := child.NetworkSettings.Networks[defaultNetName]
 		if defaultNW.IPAddress != "" {
-			sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(aliasList, defaultNW.IPAddress))
+			extraHostsOptions = append(extraHostsOptions, libnetwork.OptionExtraHost(aliasList, defaultNW.IPAddress))
 		}
 		if defaultNW.GlobalIPv6Address != "" {
-			sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(aliasList, defaultNW.GlobalIPv6Address))
+			extraHostsOptions = append(extraHostsOptions, libnetwork.OptionExtraHost(aliasList, defaultNW.GlobalIPv6Address))
 		}
 		cEndpointID = defaultNW.EndpointID
 		if cEndpointID != "" {
@@ -191,26 +208,24 @@ func (daemon *Daemon) buildSandboxOptions(cfg *config.Config, container *contain
 	}
 
 	var parentEndpoints []string
-	for alias, parent := range daemon.parents(container) {
-		if cfg.DisableBridge || !container.HostConfig.NetworkMode.IsPrivate() {
-			continue
-		}
-
+	var parentUpdateOptions []libnetwork.SandboxOption
+	for alias, parent := range parents {
 		_, alias = path.Split(alias)
-		log.G(context.TODO()).Debugf("Update /etc/hosts of %s for alias %s with ip %s", parent.ID, alias, bridgeSettings.IPAddress)
-		sboxOptions = append(sboxOptions, libnetwork.OptionParentUpdate(parent.ID, alias, bridgeSettings.IPAddress))
+		log.G(context.TODO()).Debugf("Update /etc/hosts of %s for alias %s with ip %s", parent.ID, alias, epConfig.IPAddress)
+		parentUpdateOptions = append(parentUpdateOptions, libnetwork.OptionParentUpdate(parent.ID, alias, epConfig.IPAddress))
 		if cEndpointID != "" {
 			parentEndpoints = append(parentEndpoints, cEndpointID)
 		}
 	}
 
-	sboxOptions = append(sboxOptions, libnetwork.OptionGeneric(options.Generic{
+	legacyLinksOption := libnetwork.OptionGeneric(options.Generic{
 		netlabel.GenericData: options.Generic{
 			"ParentEndpoints": parentEndpoints,
 			"ChildEndpoints":  childEndpoints,
 		},
-	}))
-	return sboxOptions, nil
+	})
+
+	return sb.AddLegacyLinks(extraHostsOptions, parentUpdateOptions, legacyLinksOption)
 }
 
 func (daemon *Daemon) updateNetworkSettings(container *container.Container, n *libnetwork.Network, endpointConfig *networktypes.EndpointSettings) error {
@@ -505,57 +520,33 @@ func (daemon *Daemon) allocateNetwork(cfg *config.Config, container *container.C
 
 	daemon.updateContainerNetworkSettings(container, nil)
 
-	// always connect default network first since only default
-	// network mode support link and we need do some setting
-	// on sandbox initialize for link, but the sandbox only be initialized
-	// on first network connecting.
-	defaultNetName := runconfig.DefaultDaemonNetworkMode().NetworkName()
-	if nConf, ok := container.NetworkSettings.Networks[defaultNetName]; ok {
-		cleanOperationalData(nConf)
-		if err := daemon.connectToNetwork(cfg, container, defaultNetName, nConf); err != nil {
+	if sb, _ := daemon.netController.GetSandbox(container.ID); sb == nil {
+		sbOptions, err := daemon.buildSandboxOptions(cfg, container)
+		if err != nil {
 			return err
 		}
-	}
-
-	// the intermediate map is necessary because "connectToNetwork" modifies "container.NetworkSettings.Networks"
-	networks := make(map[string]*network.EndpointSettings)
-	for n, epConf := range container.NetworkSettings.Networks {
-		if n == defaultNetName {
-			continue
+		sb, err = daemon.netController.NewSandbox(container.ID, sbOptions...)
+		if err != nil {
+			return err
 		}
 
-		networks[n] = epConf
+		setNetworkSandbox(container, sb)
+
+		defer func() {
+			if retErr != nil {
+				sb.Delete()
+			}
+		}()
 	}
 
+	networks := make(map[string]*network.EndpointSettings)
+	for n, epConf := range container.NetworkSettings.Networks {
+		networks[n] = epConf
+	}
 	for netName, epConf := range networks {
 		cleanOperationalData(epConf)
 		if err := daemon.connectToNetwork(cfg, container, netName, epConf); err != nil {
 			return err
-		}
-	}
-
-	// If the container is not to be connected to any network,
-	// create its network sandbox now if not present
-	if len(networks) == 0 {
-		if _, err := daemon.netController.GetSandbox(container.ID); err != nil {
-			if !errdefs.IsNotFound(err) {
-				return err
-			}
-
-			sbOptions, err := daemon.buildSandboxOptions(cfg, container)
-			if err != nil {
-				return err
-			}
-			sb, err := daemon.netController.NewSandbox(container.ID, sbOptions...)
-			if err != nil {
-				return err
-			}
-			setNetworkSandbox(container, sb)
-			defer func() {
-				if retErr != nil {
-					sb.Delete()
-				}
-			}()
 		}
 	}
 
@@ -732,8 +723,11 @@ func (daemon *Daemon) connectToNetwork(cfg *config.Config, container *container.
 		return err
 	}
 
-	// TODO(thaJeztah): should this fail early if no sandbox was found?
-	sb, _ := daemon.netController.GetSandbox(container.ID)
+	sb, err := daemon.netController.GetSandbox(container.ID)
+	if err != nil {
+		return err
+	}
+
 	createOptions, err := buildCreateEndpointOptions(container, n, endpointConfig, sb, ipAddresses(cfg.DNS))
 	if err != nil {
 		return err
@@ -759,17 +753,10 @@ func (daemon *Daemon) connectToNetwork(cfg *config.Config, container *container.
 		return err
 	}
 
-	if sb == nil {
-		sbOptions, err := daemon.buildSandboxOptions(cfg, container)
-		if err != nil {
+	if nwName == runconfig.DefaultDaemonNetworkMode().NetworkName() {
+		if err := daemon.addLegacyLinks(cfg, container, endpointConfig, sb); err != nil {
 			return err
 		}
-		sb, err = daemon.netController.NewSandbox(container.ID, sbOptions...)
-		if err != nil {
-			return err
-		}
-
-		setNetworkSandbox(container, sb)
 	}
 
 	joinOptions, err := buildJoinOptions(container.NetworkSettings, n)

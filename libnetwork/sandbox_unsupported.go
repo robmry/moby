@@ -30,3 +30,8 @@ func (sb *Sandbox) populateNetworkResources(*Endpoint) error {
 	// not implemented on Windows (Sandbox.osSbox is always nil)
 	return nil
 }
+
+func (sb *Sandbox) rebuildHostsFile() error {
+	// No hosts file to update on Windows.
+	return nil
+}

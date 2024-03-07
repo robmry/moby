@@ -26,10 +26,12 @@ const (
 	resolverIPSandbox = "127.0.0.11"
 )
 
-// finishInitDNS is to be called after the container namespace has been created,
-// before it the user process is started. The container's support for IPv6 can be
-// determined at this point.
-func (sb *Sandbox) finishInitDNS() error {
+// rebuildHostsFile builds the container's /etc/hosts file, based on the current
+// state of the Sandbox (including extra hosts). If called after the container
+// namespace has been created, before the user process is started, the container's
+// support for IPv6 can be determined and IPv6 hosts will be included/excluded
+// accordingly.
+func (sb *Sandbox) rebuildHostsFile() error {
 	if err := sb.buildHostsFile(); err != nil {
 		return errdefs.System(err)
 	}
