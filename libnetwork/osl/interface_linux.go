@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sys/unix"
 )
 
 // newInterface creates a new interface in the given namespace using the
@@ -162,20 +163,19 @@ func (n *Namespace) findDst(srcName string, isBridge bool) string {
 	return ""
 }
 
-func moveLink(ctx context.Context, nlhHost *netlink.Handle, iface netlink.Link, i *Interface, path string) error {
+func moveLink(ctx context.Context, nlhHost *netlink.Handle, iface netlink.Link, i *Interface, path string) (netns.NsHandle, error) {
 	ctx, span := otel.Tracer("").Start(ctx, "libnetwork.osl.moveLink", trace.WithAttributes(
 		attribute.String("ifaceName", i.DstName())))
 	defer span.End()
 
 	newNs, err := netns.GetFromPath(path)
 	if err != nil {
-		return fmt.Errorf("failed get network namespace %q: %v", path, err)
+		return netns.None(), fmt.Errorf("failed get network namespace %q: %v", path, err)
 	}
-	defer newNs.Close()
 	if err := nlhHost.LinkSetNsFd(iface, int(newNs)); err != nil {
-		return fmt.Errorf("failed to set namespace on link %q: %v", i.srcName, err)
+		return netns.None(), fmt.Errorf("failed to set namespace on link %q: %v", i.srcName, err)
 	}
-	return nil
+	return newNs, nil
 }
 
 // AddInterface adds an existing Interface to the sandbox. The operation will rename
@@ -208,6 +208,8 @@ func (n *Namespace) AddInterface(ctx context.Context, srcName, dstPrefix string,
 	nlhHost := ns.NlHandle()
 	n.mu.Unlock()
 
+	newNs := netns.None()
+
 	// If it is a bridge interface we have to create the bridge inside
 	// the namespace so don't try to lookup the interface using srcName
 	if i.bridge {
@@ -229,9 +231,12 @@ func (n *Namespace) AddInterface(ctx context.Context, srcName, dstPrefix string,
 		// namespace only if the namespace is not a default
 		// type
 		if !isDefault {
-			if err := moveLink(ctx, nlhHost, iface, i, path); err != nil {
+			var err error
+			newNs, err = moveLink(ctx, nlhHost, iface, i, path)
+			if err != nil {
 				return err
 			}
+			defer newNs.Close()
 		}
 	}
 
@@ -261,6 +266,51 @@ func (n *Namespace) AddInterface(ctx context.Context, srcName, dstPrefix string,
 		return err
 	}
 
+	var (
+		update = make(chan netlink.LinkUpdate, 100)
+		upped  = make(chan struct{})
+	)
+	if newNs.IsOpen() {
+		err = netlink.LinkSubscribeAt(newNs, update, upped)
+	} else {
+		err = netlink.LinkSubscribe(update, upped)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to link updates: %w", err)
+	}
+
+	go func(ifi int) {
+		timer := time.NewTimer(5 * time.Second)
+		defer timer.Stop()
+		defer close(upped)
+
+		// FIXME(corhere): don't want to hang waiting for a no-carrier link that will never be ready.
+		const wantedFlags = unix.IFF_UP | unix.IFF_RUNNING | unix.IFF_LOWER_UP
+	eventLoop:
+		for {
+			select {
+			case <-timer.C:
+				break eventLoop
+			case u := <-update:
+				if u.Attrs().Index != ifi {
+					continue
+				}
+				log.G(context.TODO()).WithFields(log.Fields{
+					"iface": u.Attrs().Name,
+					"ifi":   u.Attrs().Index,
+					"flags": deviceFlags(u.Flags),
+				}).Debug("link update")
+				if u.Flags&unix.IFF_NO_CARRIER != 0 {
+					// The link will never be ready.
+					break eventLoop
+				}
+				if u.Flags&wantedFlags == wantedFlags {
+					break eventLoop
+				}
+			}
+		}
+	}(iface.Attrs().Index)
+
 	// Up the interface.
 	cnt := 0
 	for err = nlh.LinkSetUp(iface); err != nil && cnt < 3; cnt++ {
@@ -275,10 +325,40 @@ func (n *Namespace) AddInterface(ctx context.Context, srcName, dstPrefix string,
 	if err != nil {
 		return fmt.Errorf("failed to set link up: %v", err)
 	}
+	log.G(ctx).Debug("link has been set to up")
 
 	// Set the routes on the interface. This can only be done when the interface is up.
 	if err := setInterfaceRoutes(ctx, nlh, iface, i); err != nil {
 		return fmt.Errorf("error setting interface %q routes to %q: %v", iface.Attrs().Name, i.Routes(), err)
+	}
+
+	// When the net.ipv4.conf.[iface].arp_notify sysctl is set to 1, the
+	// kernel is supposed to send a gratuitous ARP when the interface is
+	// brought up. However, this functionality is broken on at least the
+	// Ubuntu 20.04 kernel
+	// https://bugs.launchpad.net/ubuntu/+source/linux/+bug/1989187
+	// and Docker Desktop's 6.6.16-linuxkit kernel. One option would be to
+	// send the gratuitous ARP ourselves from userspace using a raw socket,
+	// but that would not respect the arp_notify sysctl setting. Instead,
+	// we will trigger the kernel to send a gratuitous ARP using the other
+	// event: setting the interface's MAC address after the kernel has
+	// finished bringing up the link asynchronously.
+	<-upped
+	err = func() error {
+		iface, err := nlh.LinkByIndex(iface.Attrs().Index)
+		if err != nil {
+			return fmt.Errorf("failed to refresh link attributes: %w", err)
+		}
+		log.G(ctx).WithFields(log.Fields{
+			"iface": iface.Attrs().Name,
+			"ifi":   iface.Attrs().Index,
+			"mac":   iface.Attrs().HardwareAddr,
+			"ip":    i.Address(),
+		}).Debug("applying gratuitous ARP workaround")
+		return nlh.LinkSetHardwareAddr(iface, iface.Attrs().HardwareAddr)
+	}()
+	if err != nil {
+		log.G(ctx).WithError(err).Warn("could not apply gratuitous ARP workaround")
 	}
 
 	n.mu.Lock()
