@@ -1212,6 +1212,10 @@ func (d *driver) CreateEndpoint(ctx context.Context, nid, eid string, ifInfo dri
 	if err = d.linkUp(ctx, host); err != nil {
 		return fmt.Errorf("could not set link up for host interface %s: %v", hostIfName, err)
 	}
+	log.G(ctx).WithFields(log.Fields{
+		"hostifname": host.Attrs().Name,
+		"ifi":        host.Attrs().Index,
+	}).Debugf("bridge endpoint host link is up")
 
 	if endpoint.addrv6 == nil && config.EnableIPv6 {
 		var ip6 net.IP
