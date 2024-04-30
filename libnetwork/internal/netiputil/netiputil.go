@@ -19,7 +19,8 @@ func ToIPNet(p netip.Prefix) *net.IPNet {
 }
 
 // ToPrefix converts n into a netip.Prefix. If n is not a valid IPv4 or IPV6
-// address, ToPrefix returns netip.Prefix{}, false.
+// address, ToPrefix returns netip.Prefix{}, false. If host bits are set in
+// n, they are not masked in the result.
 func ToPrefix(n *net.IPNet) (netip.Prefix, bool) {
 	if ll := len(n.Mask); ll != net.IPv4len && ll != net.IPv6len {
 		return netip.Prefix{}, false
@@ -35,7 +36,12 @@ func ToPrefix(n *net.IPNet) (netip.Prefix, bool) {
 		return netip.Prefix{}, false
 	}
 
-	return netip.PrefixFrom(addr.Unmap(), ones), true
+	// If n.IP is an IPv4-mapped address, don't unmap it.
+	if bits != 128 {
+		addr = addr.Unmap()
+	}
+
+	return netip.PrefixFrom(addr, ones), true
 }
 
 // HostID masks out the 'bits' most-significant bits of addr. The result is

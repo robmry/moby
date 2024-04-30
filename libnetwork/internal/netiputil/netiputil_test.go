@@ -1,10 +1,12 @@
 package netiputil
 
 import (
+	"net"
 	"net/netip"
 	"testing"
 
 	"gotest.tools/v3/assert"
+	is "gotest.tools/v3/assert/cmp"
 )
 
 func TestLastAddr(t *testing.T) {
@@ -42,5 +44,28 @@ func TestPrefixAfter(t *testing.T) {
 	for _, tc := range testcases {
 		next := PrefixAfter(tc.prev, tc.sz)
 		assert.Check(t, next == tc.want, "PrefixAfter(%q, %d) = %s; want: %s", tc.prev, tc.sz, next, tc.want)
+	}
+}
+
+func TestToPrefix(t *testing.T) {
+	testcases := []struct {
+		prefix string
+	}{
+		{prefix: "172.17.0.0/16"},
+		{prefix: "172.17.0.3/16"}, // host bits not masked
+		{prefix: "fdff:3fde:9a11::/64"},
+		{prefix: "fdff:3fde:9a11::2/64"},
+		{prefix: "::ffff:172.17.0.3/120"},
+	}
+	for _, tc := range testcases {
+		t.Run(tc.prefix, func(t *testing.T) {
+			ip, ipnet, err := net.ParseCIDR(tc.prefix)
+			assert.NilError(t, err)
+			ipnet.IP = ip // Keep host bits in ipnet if set in tc.prefix.
+
+			p, ok := ToPrefix(ipnet)
+			assert.Check(t, ok)
+			assert.Check(t, is.Equal(p.String(), tc.prefix))
+		})
 	}
 }
