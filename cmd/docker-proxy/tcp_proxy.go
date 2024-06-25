@@ -1,31 +1,40 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
+	"strconv"
 	"sync"
+	"syscall"
+
+	"github.com/pkg/errors"
 )
 
 // TCPProxy is a proxy for TCP connections. It implements the Proxy interface to
 // handle TCP traffic forwarding between the frontend and backend addresses.
 type TCPProxy struct {
-	listener     *net.TCPListener
+	listener     net.Listener
 	frontendAddr *net.TCPAddr
 	backendAddr  *net.TCPAddr
 }
 
 // NewTCPProxy creates a new TCPProxy.
 func NewTCPProxy(frontendAddr, backendAddr *net.TCPAddr) (*TCPProxy, error) {
-	// detect version of hostIP to bind only to correct version
-	ipVersion := ipv4
-	if frontendAddr.IP.To4() == nil {
-		ipVersion = ipv6
+	if err := syscall.Listen(int(listenSockFd), listenerBacklog()); err != nil {
+		return nil, fmt.Errorf("failed to listen on TCP socket: %w", err)
 	}
-	listener, err := net.ListenTCP("tcp"+string(ipVersion), frontendAddr)
+	f := os.NewFile(listenSockFd, "listen-sock")
+	if f == nil {
+		return nil, errors.New("failed convert TCP listen socket")
+	}
+	listener, err := net.FileListener(f)
 	if err != nil {
 		return nil, err
 	}
+	f.Close()
 	// If the port in frontendAddr was 0 then ListenTCP will have a picked
 	// a port to listen on, hence the call to Addr to get that actual port:
 	return &TCPProxy{
@@ -33,6 +42,30 @@ func NewTCPProxy(frontendAddr, backendAddr *net.TCPAddr) (*TCPProxy, error) {
 		frontendAddr: listener.Addr().(*net.TCPAddr),
 		backendAddr:  backendAddr,
 	}, nil
+}
+
+// TODO(robmry) - tidy, ack the net code
+var listenerBacklogCache struct {
+	sync.Once
+	val int
+}
+
+func maxListenerBacklog() int {
+	b, err := os.ReadFile("/proc/sys/net/core/somaxconn")
+	if err != nil {
+		return syscall.SOMAXCONN
+	}
+	n, err := strconv.ParseInt(string(b), 10, 32)
+	if n == 0 || err != nil {
+		return syscall.SOMAXCONN
+	}
+	return int(n)
+}
+
+// listenerBacklog is a caching wrapper around maxListenerBacklog.
+func listenerBacklog() int {
+	listenerBacklogCache.Do(func() { listenerBacklogCache.val = maxListenerBacklog() })
+	return listenerBacklogCache.val
 }
 
 func (proxy *TCPProxy) clientLoop(client *net.TCPConn, quit chan bool) {

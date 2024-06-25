@@ -13,8 +13,13 @@ import (
 	"github.com/ishidawataru/sctp"
 )
 
+const (
+	parentPipeFd uintptr = 3
+	listenSockFd uintptr = 4
+)
+
 func main() {
-	f := os.NewFile(3, "signal-parent")
+	f := os.NewFile(parentPipeFd, "signal-parent")
 	host, container := parseFlags()
 
 	p, err := NewProxy(host, container)
