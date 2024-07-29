@@ -1167,12 +1167,7 @@ func (d *driver) CreateEndpoint(ctx context.Context, nid, eid string, ifInfo dri
 	// that if a container is disconnected and reconnected in a short timeframe,
 	// stale ARP entries will still point to the right container.
 	if endpoint.macAddress == nil {
-		if endpoint.addr != nil {
-			endpoint.macAddress = netutils.GenerateMACFromIP(endpoint.addr.IP)
-		} else {
-			// TODO(robmry) - generate unsolicited ARP?
-			endpoint.macAddress = netutils.GenerateRandomMAC()
-		}
+		endpoint.macAddress = netutils.GenerateRandomMAC()
 		if err := ifInfo.SetMacAddress(endpoint.macAddress); err != nil {
 			return err
 		}
