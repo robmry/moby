@@ -1195,14 +1195,34 @@ func (d *driver) CreateEndpoint(ctx context.Context, nid, eid string, ifInfo dri
 	// We assign a default MAC address derived from the IP address to make sure
 	// that if a container is disconnected and reconnected in a short timeframe,
 	// stale ARP entries will still point to the right container.
+	/* TODO(robmry) ...
+	What happens when IPv6 address allocation is deferred ("postipv6" in libnetwork),
+	as a special case for the default bridge, is:
+	- an IPv4 address is IPAM-allocated by libnetwork
+	- the bridge driver derives a MAC address from that IPv4 address
+	- if IPv6 is enabled, there's not already an address, and there
+	  are at-least 48-bits in the subnet, the bridge driver proposes
+	  an IPv6 address based on the MAC address (just below here).
+	- libnetwork reserves that address with the IPAM driver (the
+	  "deferred alloc").
+
+	So it's really an IPv4-based IPv6 address, but it goes via a MAC address.
+
+	The implementation is split between here in the daemon, libnetwork, and
+	the bridge driver. None of them see the whole picture (or describe it
+	properly).
+
+	With this change, the IPv6 address will be based on the randomly assigned
+	MAC address ... which, with the gratuitous NA, probably makes the special
+	case even more pointless.
+
+	But, to preserve the old behaviour - if IPv6 is required, there's no
+	endpoint.addrv6, and there are 48-bits in the subnet ... either derive
+	the IPv6 address directly from the IPv4 address, or revert to using an
+	IPv4-based MAC adress here.
+	*/
 	if endpoint.macAddress == nil {
-		if endpoint.addr != nil {
-			endpoint.macAddress = netutils.GenerateMACFromIP(endpoint.addr.IP)
-		} else {
-			// TODO(robmry) - generate unsolicited Neighbour Advertisement to
-			//  associate this MAC address with the IPv6 address.
-			endpoint.macAddress = netutils.GenerateRandomMAC()
-		}
+		endpoint.macAddress = netutils.GenerateRandomMAC()
 		if err := ifInfo.SetMacAddress(endpoint.macAddress); err != nil {
 			return err
 		}
