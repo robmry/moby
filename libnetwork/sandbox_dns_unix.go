@@ -5,6 +5,7 @@ package libnetwork
 import (
 	"context"
 	"fmt"
+	"github.com/docker/docker/opts"
 	"io/fs"
 	"net/netip"
 	"os"
@@ -122,7 +123,19 @@ func (sb *Sandbox) buildHostsFile() error {
 
 	extraContent := make([]etchosts.Record, 0, len(sb.config.extraHosts))
 	for _, extraHost := range sb.config.extraHosts {
-		extraContent = append(extraContent, etchosts.Record{Hosts: extraHost.name, IP: extraHost.IP})
+		if extraHost.IP == opts.HostGatewayName {
+			gw4, gw6 := sb.getGatewayEndpoint()
+			if gw4 != nil {
+				extraContent = append(extraContent,
+					etchosts.Record{Hosts: extraHost.name, IP: gw4.Gateway().String()})
+			}
+			if gw6 != nil {
+				extraContent = append(extraContent,
+					etchosts.Record{Hosts: extraHost.name, IP: gw6.GatewayIPv6().String()})
+			}
+		} else {
+			extraContent = append(extraContent, etchosts.Record{Hosts: extraHost.name, IP: extraHost.IP})
+		}
 	}
 
 	// Assume IPv6 support, unless it's definitely disabled.
