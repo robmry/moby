@@ -139,7 +139,7 @@ type DNSConfig struct {
 	DNS           []net.IP `json:"dns,omitempty"`
 	DNSOptions    []string `json:"dns-opts,omitempty"`
 	DNSSearch     []string `json:"dns-search,omitempty"`
-	HostGatewayIP net.IP   `json:"host-gateway-ip,omitempty"`
+	HostGatewayIP string   `json:"host-gateway-ip,omitempty"`
 }
 
 // CommonConfig defines the configuration of a docker daemon which is

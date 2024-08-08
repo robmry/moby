@@ -2,12 +2,11 @@ package opts // import "github.com/docker/docker/opts"
 
 import (
 	"fmt"
+	units "github.com/docker/go-units"
 	"net"
 	"path"
 	"regexp"
 	"strings"
-
-	units "github.com/docker/go-units"
 )
 
 var (

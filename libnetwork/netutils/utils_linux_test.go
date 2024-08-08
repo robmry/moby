@@ -3,6 +3,7 @@ package netutils
 import (
 	"bytes"
 	"fmt"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"net/netip"
 	"slices"
 	"strings"
@@ -113,6 +114,16 @@ func createInterface(t *testing.T, name string) int {
 	return link.Attrs().Index
 }
 
+func addInterfaceAddr(t *testing.T, index int, addr netip.Prefix) {
+	t.Helper()
+
+	link, err := netlink.LinkByIndex(index)
+	assert.NilError(t, err)
+
+	err = netlink.AddrAdd(link, &netlink.Addr{IPNet: netiputil.ToIPNet(addr)})
+	assert.NilError(t, err)
+}
+
 func addRoute(t *testing.T, linkID int, scope netlink.Scope, prefix netip.Prefix) {
 	t.Helper()
 
@@ -122,5 +133,94 @@ func addRoute(t *testing.T, linkID int, scope netlink.Scope, prefix netip.Prefix
 		Dst:       netiputil.ToIPNet(prefix),
 	}); err != nil {
 		t.Fatalf("failed to add on-link route %s: %v", prefix, err)
+	}
+}
+
+func TestResolveHostGatewayIPs(t *testing.T) {
+	type ifDesc struct {
+		name  string
+		addrs []string
+	}
+
+	testCases := []struct {
+		name          string
+		hostGatewayIP string
+		ifDesc        []ifDesc
+		expAddrs      []string
+		expErr        string
+	}{
+		{
+			name:          "literal IPv4 address",
+			hostGatewayIP: "10.0.0.2",
+			expAddrs:      []string{"10.0.0.2"},
+		},
+		{
+			name:          "literal IPv6 address",
+			hostGatewayIP: "fd24:38e0:07ed:1::2",
+			expAddrs:      []string{"fd24:38e0:07ed:1::2"},
+		},
+		{
+			name:          "literal IPv4 and IPv6 addresses",
+			hostGatewayIP: "fd24:38e0:07ed:1::2, 10.0.0.2, 10.0.0.3",
+			expAddrs:      []string{"10.0.0.2", "fd24:38e0:07ed:1::2"},
+		},
+		{
+			name:          "ipv4 and ipv6 addresses from interface",
+			hostGatewayIP: "%dm-1",
+			ifDesc: []ifDesc{
+				{"dm-1", []string{"172.16.1.2/24", "fd24:38e0:07ed:1::2/64"}},
+			},
+			expAddrs: []string{"172.16.1.2", "fd24:38e0:07ed:1::2"},
+		},
+		{
+			name:          "addresses from different interfaces",
+			hostGatewayIP: " %dm-1, %dm-2, %dm-3 ",
+			ifDesc: []ifDesc{
+				{"dm-1", []string{"172.16.1.2/24"}},
+				{"dm-2", []string{"fd24:38e0:07ed:2::2/64"}},
+				{"dm-3", []string{"172.16.3.2/24", "fd24:38e0:07ed:3::2/64"}},
+			},
+			expAddrs: []string{"172.16.1.2", "fd24:38e0:07ed:2::2"},
+		},
+		{
+			name:          "literal and interface addresses",
+			hostGatewayIP: "10.0.0.2,%dm-1",
+			ifDesc: []ifDesc{
+				{"dm-1", []string{"172.16.3.2/24", "fd24:38e0:07ed:1::2/64"}},
+			},
+			expAddrs: []string{"10.0.0.2", "fd24:38e0:07ed:1::2"},
+		},
+		{
+			name:          "non-existent interface",
+			hostGatewayIP: "%notthere",
+			expErr:        `no interface for host-gateway-ip "%notthere"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			defer netnsutils.SetupTestOSContext(t)()
+
+			for _, ifd := range tc.ifDesc {
+				idx := createInterface(t, ifd.name)
+				for _, addr := range ifd.addrs {
+					p := netip.MustParsePrefix(addr)
+					addInterfaceAddr(t, idx, p)
+				}
+			}
+
+			addrs, err := ResolveHostGatewayIPs(tc.hostGatewayIP)
+			if tc.expErr != "" {
+				assert.Check(t, is.ErrorContains(err, tc.expErr))
+			} else {
+				assert.Check(t, err)
+				var expAddrs []netip.Addr
+				for _, ea := range tc.expAddrs {
+					expAddrs = append(expAddrs, netip.MustParseAddr(ea))
+				}
+				assert.Check(t, is.DeepEqual(addrs, expAddrs, cmpopts.EquateComparable(netip.Addr{})))
+			}
+		})
 	}
 }

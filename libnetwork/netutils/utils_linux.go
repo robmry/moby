@@ -4,9 +4,12 @@
 package netutils
 
 import (
+	"fmt"
 	"net/netip"
 	"os"
 	"slices"
+	"strings"
+	"syscall"
 
 	"github.com/docker/docker/libnetwork/internal/netiputil"
 	"github.com/docker/docker/libnetwork/ns"
@@ -118,4 +121,57 @@ func GenerateIfaceName(nlh *netlink.Handle, prefix string, len int) (string, err
 		}
 	}
 	return "", types.InternalErrorf("could not generate interface name")
+}
+
+func ResolveHostGatewayIPs(hgip string) ([]netip.Addr, error) {
+	var gw4, gw6 netip.Addr
+	addAddr := func(a netip.Addr) {
+		if !a.IsGlobalUnicast() {
+			return
+		}
+		if a.Is4() && !gw4.IsValid() {
+			gw4 = a
+		}
+		if a.Is6() && !gw6.IsValid() {
+			gw6 = a
+		}
+	}
+	for _, hg := range strings.Split(hgip, ",") {
+		hg = strings.TrimSpace(hg)
+		if hg == "" {
+			continue
+		}
+		if hg[0] == '%' && len(hg) > 2 {
+			link, err := netlink.LinkByName(hg[1:])
+			if err != nil {
+				return nil, fmt.Errorf("no interface for host-gateway-ip %q", hg)
+			}
+			addrs, err := netlink.AddrList(link, netlink.FAMILY_ALL)
+			if err != nil {
+				return nil, fmt.Errorf("unable to read addresses from interface %q for host-gateway-ip: %w", hg, err)
+			}
+			for _, addr := range addrs {
+				if addr.Flags&syscall.IFA_F_DEPRECATED != 0 {
+					continue
+				}
+				if ip, ok := netip.AddrFromSlice(addr.IP); ok {
+					addAddr(ip)
+				}
+			}
+		} else {
+			addr, err := netip.ParseAddr(hg)
+			if err != nil {
+				return nil, fmt.Errorf("unable to parse host-gateway-ip %q", hg)
+			}
+			addAddr(addr.Unmap())
+		}
+	}
+	var gwIPs []netip.Addr
+	if gw4.IsValid() {
+		gwIPs = append(gwIPs, gw4)
+	}
+	if gw6.IsValid() {
+		gwIPs = append(gwIPs, gw6)
+	}
+	return gwIPs, nil
 }

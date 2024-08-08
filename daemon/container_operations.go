@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/docker/docker/libnetwork/netutils"
 	"net"
 	"os"
 	"path"
@@ -88,13 +89,16 @@ func (daemon *Daemon) buildSandboxOptions(cfg *config.Config, ctr *container.Con
 		// value with the IP address stored in the daemon level HostGatewayIP
 		// config variable
 		if ip == opts.HostGatewayName {
-			gateway := cfg.HostGatewayIP.String()
-			if gateway == "" {
-				return nil, fmt.Errorf("unable to derive the IP value for host-gateway")
+			addrs, err := netutils.ResolveHostGatewayIPs(cfg.HostGatewayIP)
+			if err != nil {
+				return nil, err
 			}
-			ip = gateway
+			for _, addr := range addrs {
+				sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, addr.String()))
+			}
+		} else {
+			sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, ip))
 		}
-		sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, ip))
 	}
 
 	bindings := make(nat.PortMap)

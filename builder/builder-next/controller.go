@@ -481,6 +481,6 @@ func getLabels(opt Opt, labels map[string]string) map[string]string {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	labels[wlabel.HostGatewayIP] = opt.DNSConfig.HostGatewayIP.String()
+	labels[wlabel.HostGatewayIP] = opt.DNSConfig.HostGatewayIP
 	return labels
 }
