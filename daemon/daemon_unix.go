@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -760,6 +761,9 @@ func verifyDaemonSettings(conf *config.Config) error {
 	if conf.Rootless && UsingSystemd(conf) && cgroups.Mode() != cgroups.Unified {
 		return fmt.Errorf("exec-opt native.cgroupdriver=systemd requires cgroup v2 for rootless mode")
 	}
+	if err := verifyAndNormHostGatewayIP(conf); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -893,19 +897,49 @@ func configureNetworking(controller *libnetwork.Controller, conf *config.Config)
 	return nil
 }
 
+// verifyAndNormHostGatewayIP check that --host-gateway-ip contains valid
+// addresses, and at-most one IPv4 and one IPv6 address. Unmap, trim whitespace,
+// and remove unnecessary commas.
+func verifyAndNormHostGatewayIP(conf *config.Config) error {
+	var ips []string
+	var lastAddr netip.Addr
+	for _, gwIP := range strings.Split(conf.HostGatewayIP, ",") {
+		gwIP = strings.TrimSpace(gwIP)
+		if gwIP == "" {
+			continue
+		}
+		addr, err := netip.ParseAddr(gwIP)
+		if err != nil {
+			return fmt.Errorf("invalid IP %q in host-gateway-ip", gwIP)
+		}
+		addr = addr.Unmap()
+		if len(ips) >= 2 || (lastAddr.IsValid() && lastAddr.Is4() == addr.Is4()) {
+			return fmt.Errorf("at most one IPv4 and one IPv6 address are allowed in host-gateway-ip")
+		}
+		lastAddr = addr
+		ips = append(ips, addr.String())
+	}
+	conf.HostGatewayIP = strings.Join(ips, ",")
+	return nil
+}
+
 // setHostGatewayIP sets cfg.HostGatewayIP to the default bridge's IP if it is empty.
 func setHostGatewayIP(controller *libnetwork.Controller, config *config.Config) {
-	if config.HostGatewayIP != nil {
+	if config.HostGatewayIP != "" {
 		return
 	}
+	var ips []string
 	if n, err := controller.NetworkByName(network.NetworkBridge); err == nil {
 		v4Info, v6Info := n.IpamInfo()
 		if len(v4Info) > 0 {
-			config.HostGatewayIP = v4Info[0].Gateway.IP
-		} else if len(v6Info) > 0 {
-			config.HostGatewayIP = v6Info[0].Gateway.IP
+			ips = append(ips, v4Info[0].Gateway.IP.String())
+		}
+		if len(v6Info) > 0 {
+			ips = append(ips, v6Info[0].Gateway.IP.String())
 		}
 	}
+	config.HostGatewayIP = strings.Join(ips, ",")
+	return
 }
 
 func driverOptions(config *config.Config) nwconfig.Option {
