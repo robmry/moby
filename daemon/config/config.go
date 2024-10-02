@@ -14,6 +14,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types/versions"
+	iopts "github.com/docker/docker/internal/opts"
 	"github.com/docker/docker/opts"
 	"github.com/docker/docker/registry"
 	"github.com/pkg/errors"
@@ -139,10 +140,10 @@ type TLSOptions struct {
 
 // DNSConfig defines the DNS configurations.
 type DNSConfig struct {
-	DNS           []net.IP `json:"dns,omitempty"`
-	DNSOptions    []string `json:"dns-opts,omitempty"`
-	DNSSearch     []string `json:"dns-search,omitempty"`
-	HostGatewayIP net.IP   `json:"host-gateway-ip,omitempty"`
+	DNS           []net.IP          `json:"dns,omitempty"`
+	DNSOptions    []string          `json:"dns-opts,omitempty"`
+	DNSSearch     []string          `json:"dns-search,omitempty"`
+	HostGatewayIP iopts.HostGateway `json:"host-gateway-ip,omitempty"`
 }
 
 // CommonConfig defines the configuration of a docker daemon which is
