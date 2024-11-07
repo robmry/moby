@@ -137,12 +137,12 @@ func (sb *Sandbox) buildHostsFile(ctx context.Context, ifaceIPs []netip.Addr) er
 	}
 
 	extraContent := make([]etchosts.Record, 0, len(sb.config.extraHosts)+len(ifaceIPs))
-	for _, extraHost := range sb.config.extraHosts {
-		addr, err := netip.ParseAddr(extraHost.IP)
+	for _, host := range sb.config.extraHosts {
+		addr, err := netip.ParseAddr(host.IP)
 		if err != nil {
-			return errdefs.InvalidParameter(fmt.Errorf("could not parse extra host IP %s: %v", extraHost.IP, err))
+			return errdefs.InvalidParameter(fmt.Errorf("could not parse extra host IP %s: %v", host.IP, err))
 		}
-		extraContent = append(extraContent, etchosts.Record{Hosts: extraHost.name, IP: addr})
+		extraContent = append(extraContent, etchosts.Record{Hosts: host.name, IP: addr})
 	}
 	extraContent = append(extraContent, sb.makeHostsRecs(ifaceIPs)...)
 
