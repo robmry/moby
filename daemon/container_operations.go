@@ -87,11 +87,11 @@ func buildSandboxOptions(cfg *config.Config, ctr *container.Container) ([]libnet
 		// value with the IP address(es) stored in the daemon level HostGatewayIP
 		// config variable
 		if ip == opts.HostGatewayName {
-			if cfg.HostGatewayIP.V4 != "" {
-				sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, cfg.HostGatewayIP.V4))
+			if len(cfg.HostGatewayIPs) == 0 {
+				return nil, fmt.Errorf("unable to derive the IP value for host-gateway")
 			}
-			if cfg.HostGatewayIP.V6 != "" {
-				sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, cfg.HostGatewayIP.V6))
+			for _, gip := range cfg.HostGatewayIPs {
+				sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, gip))
 			}
 		} else {
 			sboxOptions = append(sboxOptions, libnetwork.OptionExtraHost(host, ip))

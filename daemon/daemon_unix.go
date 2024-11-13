@@ -899,16 +899,16 @@ func configureNetworking(controller *libnetwork.Controller, conf *config.Config)
 
 // setHostGatewayIP sets cfg.HostGatewayIP to the default bridge's IP if it is empty.
 func setHostGatewayIP(controller *libnetwork.Controller, config *config.Config) {
-	if config.HostGatewayIP.V4 != "" || config.HostGatewayIP.V6 != "" {
+	if len(config.HostGatewayIPs) > 0 {
 		return
 	}
 	if n, err := controller.NetworkByName(network.NetworkBridge); err == nil {
 		v4Info, v6Info := n.IpamInfo()
 		if len(v4Info) > 0 {
-			config.HostGatewayIP.V4 = v4Info[0].Gateway.IP.String()
+			config.HostGatewayIPs = append(config.HostGatewayIPs, v4Info[0].Gateway.IP.String())
 		}
 		if len(v6Info) > 0 {
-			config.HostGatewayIP.V6 = v6Info[0].Gateway.IP.String()
+			config.HostGatewayIPs = append(config.HostGatewayIPs, v6Info[0].Gateway.IP.String())
 		}
 	}
 }

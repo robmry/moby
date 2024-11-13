@@ -3,6 +3,7 @@ package buildkit
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -482,13 +483,17 @@ func getLabels(opt Opt, labels map[string]string) map[string]string {
 	if labels == nil {
 		labels = make(map[string]string)
 	}
-	// TODO(robmry) - buildx has its own version of toBuildkitExtraHosts(), which
-	//   needs to be updated to understand >1 address.
-	// labels[wlabel.HostGatewayIP] = opt.DNSConfig.HostGatewayIP.String()
-	if opt.DNSConfig.HostGatewayIP.V4 != "" {
-		labels[wlabel.HostGatewayIP] = opt.DNSConfig.HostGatewayIP.V4
-	} else if opt.DNSConfig.HostGatewayIP.V6 != "" {
-		labels[wlabel.HostGatewayIP] = opt.DNSConfig.HostGatewayIP.V6
+	if len(opt.DNSConfig.HostGatewayIPs) > 0 {
+		// TODO(robmry) - buildx has its own version of toBuildkitExtraHosts(), which
+		//   needs to be updated to understand >1 address. For now, take the IPv4 address
+		//   if there is one, else IPv6.
+		// labels[wlabel.HostGatewayIP] = strings.Join(opt.DNSConfig.HostGatewayIPs, ",")
+		for _, gip := range opt.DNSConfig.HostGatewayIPs {
+			labels[wlabel.HostGatewayIP] = gip
+			if addr, err := netip.ParseAddr(gip); err == nil && addr.Is4() {
+				break
+			}
+		}
 	}
 	return labels
 }

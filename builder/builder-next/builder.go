@@ -23,7 +23,6 @@ import (
 	"github.com/docker/docker/daemon/config"
 	"github.com/docker/docker/daemon/images"
 	"github.com/docker/docker/errdefs"
-	iopts "github.com/docker/docker/internal/opts"
 	"github.com/docker/docker/libnetwork"
 	"github.com/docker/docker/opts"
 	"github.com/docker/docker/pkg/idtools"
@@ -354,7 +353,7 @@ func (b *Builder) Build(ctx context.Context, opt backend.BuildConfig) (*builder.
 		return nil, errors.Errorf("network mode %q not supported by buildkit", opt.Options.NetworkMode)
 	}
 
-	extraHosts, err := toBuildkitExtraHosts(opt.Options.ExtraHosts, b.dnsconfig.HostGatewayIP)
+	extraHosts, err := toBuildkitExtraHosts(opt.Options.ExtraHosts, b.dnsconfig.HostGatewayIPs)
 	if err != nil {
 		return nil, err
 	}
@@ -600,7 +599,7 @@ func (j *buildJob) SetUpload(ctx context.Context, rc io.ReadCloser) error {
 }
 
 // toBuildkitExtraHosts converts hosts from docker key:value format to buildkit's csv format
-func toBuildkitExtraHosts(inp []string, hostGatewayIP iopts.HostGateway) (string, error) {
+func toBuildkitExtraHosts(inp []string, hostGatewayIPs []string) (string, error) {
 	if len(inp) == 0 {
 		return "", nil
 	}
@@ -611,16 +610,13 @@ func toBuildkitExtraHosts(inp []string, hostGatewayIP iopts.HostGateway) (string
 			return "", errors.Errorf("invalid host %s", h)
 		}
 		// If the IP Address is a "host-gateway", replace this value with the
-		// IP address(es) stored in the daemon level HostGatewayIP config variable.
+		// IP address(es) stored in the daemon level HostGatewayIPs config variable.
 		if ip == opts.HostGatewayName {
-			if hostGatewayIP.V4 == "" && hostGatewayIP.V6 == "" {
+			if len(hostGatewayIPs) == 0 {
 				return "", fmt.Errorf("unable to derive the IP value for host-gateway")
 			}
-			if hostGatewayIP.V4 != "" {
-				hosts = append(hosts, host+"="+hostGatewayIP.V4)
-			}
-			if hostGatewayIP.V6 != "" {
-				hosts = append(hosts, host+"="+hostGatewayIP.V6)
+			for _, gip := range hostGatewayIPs {
+				hosts = append(hosts, host+"="+gip)
 			}
 		} else {
 			hosts = append(hosts, host+"="+ip)

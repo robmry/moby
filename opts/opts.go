@@ -1,8 +1,10 @@
 package opts // import "github.com/docker/docker/opts"
 
 import (
+	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"path"
 	"regexp"
 	"strings"
@@ -330,6 +332,29 @@ func validateDomain(val string) (string, error) {
 		return string(ns[1]), nil
 	}
 	return "", fmt.Errorf("%s is not a valid domain", val)
+}
+
+// ValidateHostGatewayIPs makes sure the addresses are valid, and there's at-most one IPv4 and one IPv6 address.
+func ValidateHostGatewayIPs(hostGatewayIPs []string) error {
+	var have4, have6 bool
+	for _, ip := range hostGatewayIPs {
+		addr, err := netip.ParseAddr(ip)
+		if err != nil {
+			return errors.New("host gateway IP address is not correctly formatted: " + ip)
+		}
+		if addr.Is4() {
+			if have4 {
+				return errors.New("only one IPv4 host gateway IP address can be specified")
+			}
+			have4 = true
+		} else {
+			if have6 {
+				return errors.New("only one IPv6 host gateway IP address can be specified")
+			}
+			have6 = true
+		}
+	}
+	return nil
 }
 
 // ValidateLabel validates that the specified string is a valid label,
