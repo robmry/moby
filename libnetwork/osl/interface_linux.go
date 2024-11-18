@@ -12,6 +12,7 @@ import (
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/internal/nlwrap"
+	"github.com/docker/docker/libnetwork/netlabel"
 	"github.com/docker/docker/libnetwork/ns"
 	"github.com/docker/docker/libnetwork/types"
 	"github.com/pkg/errors"
@@ -23,14 +24,39 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const (
+	// advAddrCountMin/Max/Default define the min/max/default values for the number
+	// of gratuitous ARP/NA messages sent to advertise an interface's addresses when
+	// it is configured.
+	//
+	// Zero can be used to disable gratuitous ARP/NA. The default is three, to match
+	// RFC-5227 Section 1.1 ("PROBE_NUM=3") and RFC-4861 MAX_NEIGHBOR_ADVERTISEMENT.
+	advAddrCountMin        = 0
+	advAddrCountMax        = 3
+	advAddrCountMaxDefault = 3
+
+	// advAddrCountMin/Max/Default define the min/max/default interval between the
+	// gratuitous ARP/NA messages sent to advertise an interface's addresses when it
+	// is configured.
+	//
+	// The default of 1s matches RFC-5227 PROBE_MIN and the default for RetransTimer
+	// in RFC-4861. So, the min defined here is nonstandard but faster resends may
+	// be useful in a bridge network. The max of 2s matches RFC-5227 PROBE_MAX.
+	advAddrIntervalMsMin     = 100
+	advAddrIntervalMsMax     = 2000
+	advAddrIntervalMsDefault = 1000
+)
+
 // newInterface creates a new interface in the given namespace using the
 // provided options.
 func newInterface(ns *Namespace, srcName, dstPrefix string, options ...IfaceOption) (*Interface, error) {
 	i := &Interface{
-		stopCh:  make(chan struct{}),
-		srcName: srcName,
-		dstName: dstPrefix,
-		ns:      ns,
+		stopCh:          make(chan struct{}),
+		srcName:         srcName,
+		dstName:         dstPrefix,
+		advAddrCount:    advAddrCountMaxDefault,
+		advAddrInterval: advAddrIntervalMsDefault * time.Millisecond,
+		ns:              ns,
 	}
 	for _, opt := range options {
 		if opt != nil {
@@ -67,7 +93,13 @@ type Interface struct {
 	routes      []*net.IPNet
 	bridge      bool
 	sysctls     []string
-	ns          *Namespace
+	// advAddrCount is the number of gratuitous ARP/NA messages that will be sent to
+	// advertise the interface's addresses.
+	advAddrCount int
+	// advAddrInterval is the interval between gratuitous ARP/NA messages sent to
+	// advertise the interface's addresses.
+	advAddrInterval time.Duration
+	ns              *Namespace
 }
 
 // SrcName returns the name of the interface in the origin network namespace.
@@ -406,6 +438,10 @@ func advertiseAddrs(ctx context.Context, ifIndex int, i *Interface, nlh nlwrap.H
 		"ip6":   i.AddressIPv6(),
 	}
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(logFields))
+	if i.advAddrCount == 0 {
+		log.G(ctx).Debug("Gratuitous ARP/NA is disabled")
+		return
+	}
 
 	triggerSend := func(ctx context.Context, nSent int) error {
 		uppedIface, err := nlh.LinkByIndex(ifIndex)
@@ -424,13 +460,16 @@ func advertiseAddrs(ctx context.Context, ifIndex int, i *Interface, nlh nlwrap.H
 		log.G(ctx).WithError(err).Warn("Could not trigger gratuitous ARP/NA")
 		return
 	}
+	if i.advAddrCount == 1 {
+		return
+	}
 
 	go func() {
 		ctx, span := otel.Tracer("").Start(context.WithoutCancel(ctx), "libnetwork.osl.advertiseAddrs")
 		defer span.End()
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(i.advAddrInterval)
 		defer ticker.Stop()
-		for nSent, nToSend := 1, 3; nSent < nToSend; nSent += 1 {
+		for nSent, nToSend := 1, i.advAddrCount; nSent < nToSend; nSent += 1 {
 			select {
 			case <-i.stopCh:
 				log.G(ctx).Info("Gratuitous ARP/NA cancelled")
@@ -443,6 +482,29 @@ func advertiseAddrs(ctx context.Context, ifIndex int, i *Interface, nlh nlwrap.H
 			}
 		}
 	}()
+}
+
+// ValidateAdvAddrCount returns an error if count is not within the allowed
+// range for the number of gratuitous ARP/NA messages sent to advertise an
+// interface's addresses when it is configured.
+func ValidateAdvAddrCount(count int) error {
+	if count < advAddrCountMin || count > advAddrCountMax {
+		return types.InvalidParameterErrorf(netlabel.AdvAddrCount+" must be in the range %d to %d",
+			advAddrCountMin, advAddrCountMax)
+	}
+	return nil
+}
+
+// ValidateAdvAddrInterval returns an error if interval is not within the allowed
+// range for the interval between gratuitous ARP/NA messages sent to advertise an
+// interface's addresses when it is configured.
+func ValidateAdvAddrInterval(interval time.Duration) error {
+	if interval < (advAddrIntervalMsMin*time.Millisecond) ||
+		interval > (advAddrIntervalMsMax*time.Millisecond) {
+		return types.InvalidParameterErrorf(netlabel.AdvAddrIntervalMs+" must be in the range %d to %d",
+			advAddrIntervalMsMin, advAddrIntervalMsMax)
+	}
+	return nil
 }
 
 // RemoveInterface removes an interface from the namespace by renaming to

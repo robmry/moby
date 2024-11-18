@@ -321,6 +321,12 @@ func (sb *Sandbox) populateNetworkResources(ctx context.Context, ep *Endpoint) e
 		if sysctls := ep.getSysctls(); len(sysctls) > 0 {
 			ifaceOptions = append(ifaceOptions, osl.WithSysctls(sysctls))
 		}
+		if advAddrCount, ok := ep.getAdvAddrCount(); ok {
+			ifaceOptions = append(ifaceOptions, osl.WithAdvertiseAddrCount(advAddrCount))
+		}
+		if advAddrInterval, ok := ep.getAdvAddrInterval(); ok {
+			ifaceOptions = append(ifaceOptions, osl.WithAdvertiseAddrInterval(advAddrInterval))
+		}
 
 		if err := sb.osSbox.AddInterface(ctx, i.srcName, i.dstPrefix, ifaceOptions...); err != nil {
 			return fmt.Errorf("failed to add interface %s to sandbox: %v", i.srcName, err)

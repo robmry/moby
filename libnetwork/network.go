@@ -6,13 +6,17 @@ package libnetwork
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/docker/docker/libnetwork/osl"
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/libnetwork/datastore"
@@ -362,7 +366,18 @@ func (n *Network) validateConfiguration() error {
 				"[ ingress | internal | attachable | scope ] are not supported.")
 		}
 	}
-	if n.configFrom != "" {
+	if n.configFrom == "" {
+		var errs []error
+		if advAddrCount, exists := n.getAdvAddrCount(); exists {
+			errs = append(errs, osl.ValidateAdvAddrCount(advAddrCount))
+		}
+		if advAddrInterval, exists := n.getAdvAddrInterval(); exists {
+			errs = append(errs, osl.ValidateAdvAddrInterval(advAddrInterval))
+		}
+		if len(errs) > 0 {
+			return errors.Join(errs...)
+		}
+	} else {
 		if n.configOnly {
 			return types.ForbiddenErrorf("a configuration network cannot depend on another configuration network")
 		}
@@ -527,6 +542,30 @@ func (n *Network) getEpCnt() *endpointCnt {
 	defer n.mu.Unlock()
 
 	return n.epCnt
+}
+
+func (n *Network) getAdvAddrCount() (int, bool) {
+	advAddrCountStr, ok := n.DriverOptions()[netlabel.AdvAddrCount]
+	if !ok {
+		return 0, false
+	}
+	advAddrCount, err := strconv.Atoi(advAddrCountStr)
+	if err != nil {
+		return 0, false
+	}
+	return advAddrCount, true
+}
+
+func (n *Network) getAdvAddrInterval() (time.Duration, bool) {
+	advAddrIntervalStr, ok := n.DriverOptions()[netlabel.AdvAddrIntervalMs]
+	if !ok {
+		return 0, false
+	}
+	advAddrInterval, err := strconv.Atoi(advAddrIntervalStr)
+	if err != nil {
+		return 0, false
+	}
+	return time.Duration(advAddrInterval) * time.Millisecond, true
 }
 
 // TODO : Can be made much more generic with the help of reflection (but has some golang limitations)

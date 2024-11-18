@@ -39,6 +39,14 @@ const (
 	// DriverMTU constant represents the MTU size for the network driver
 	DriverMTU = DriverPrefix + ".mtu"
 
+	// AdvAddrCount is the number of gratuitous ARP/NA messages that will be sent to
+	// advertise an interface's IP and MAC addresses.
+	AdvAddrCount = Prefix + ".adv_addr_count"
+
+	// AdvAddrIntervalMs is the minimum interval in milliseconds between gratuitous
+	// ARP/NA messages sent to advertise an interface's IP and MAC addresses.
+	AdvAddrIntervalMs = Prefix + ".adv_addr_ms"
+
 	// OverlayVxlanIDList constant represents a list of VXLAN Ids as csv
 	OverlayVxlanIDList = DriverPrefix + ".overlay.vxlanid_list"
 
