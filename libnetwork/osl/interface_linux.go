@@ -2,6 +2,7 @@ package osl
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/internal/nlwrap"
+	"github.com/docker/docker/libnetwork/internal/l2disco"
 	"github.com/docker/docker/libnetwork/netlabel"
 	"github.com/docker/docker/libnetwork/ns"
 	"github.com/docker/docker/libnetwork/types"
@@ -330,7 +332,7 @@ func (n *Namespace) AddInterface(ctx context.Context, srcName, dstPrefix string,
 	}
 
 	<-upped
-	advertiseAddrs(ctx, iface.Attrs().Index, i, nlh)
+	n.advertiseAddrs(ctx, iface.Attrs().Index, i, nlh)
 
 	n.mu.Lock()
 	n.iFaces = append(n.iFaces, i)
@@ -428,43 +430,82 @@ func waitForIfUpped(ctx context.Context, ns netns.NsHandle, ifIndex int) (chan s
 //
 // Do this even if there's no IPv4 address, it also means an IPv6
 // Neighbour Advertisement is sent immediately.
-func advertiseAddrs(ctx context.Context, ifIndex int, i *Interface, nlh nlwrap.Handle) {
-	mac := i.MacAddress().String()
+func (n *Namespace) advertiseAddrs(ctx context.Context, ifIndex int, i *Interface, nlh nlwrap.Handle) {
+	macStr := i.MacAddress().String()
 	logFields := log.Fields{
 		"iface": i.dstName,
 		"ifi":   ifIndex,
-		"mac":   mac,
+		"mac":   macStr,
 		"ip4":   i.Address(),
 		"ip6":   i.AddressIPv6(),
 	}
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(logFields))
+
 	if i.advAddrCount == 0 {
-		log.G(ctx).Debug("Gratuitous ARP/NA is disabled")
+		log.G(ctx).Debug("Unsolicited ARP/NA is disabled")
+		return
+	}
+	if i.address == nil && i.addressIPv6 == nil {
+		log.G(ctx).Debug("No IP addresses to advertise")
 		return
 	}
 
-	triggerSend := func(ctx context.Context, nSent int) error {
+	arpSender, naSender := n.prepAdvertiseAddrs(ctx, i, ifIndex)
+	if arpSender == nil && naSender == nil {
+		return
+	}
+	cleanup := func() {
+		if arpSender != nil {
+			arpSender.Close()
+		}
+		if naSender != nil {
+			naSender.Close()
+		}
+	}
+	stillSending := false
+	defer func() {
+		if !stillSending {
+			cleanup()
+		}
+	}()
+
+	send := func(ctx context.Context, nSent int) error {
 		uppedIface, err := nlh.LinkByIndex(ifIndex)
 		if err != nil {
-			return fmt.Errorf("failed to refresh link attributes: %w", err)
+			log.G(ctx).WithError(err).Warn("failed to refresh link attributes")
+			return err
 		}
-		if curMac := uppedIface.Attrs().HardwareAddr.String(); curMac != mac {
-			return fmt.Errorf("MAC address changed to %s", curMac)
+		if curMAC := uppedIface.Attrs().HardwareAddr.String(); curMAC != macStr {
+			log.G(ctx).WithFields(log.Fields{"newMAC": curMAC}).Warn("MAC address changed")
+			return err
 		}
-		log.G(ctx).WithFields(log.Fields{"n": nSent + 1}).Debug("Triggering gratuitous ARP/NA")
-		return setInterfaceMAC(ctx, nlh, uppedIface, i)
+		log.G(ctx).WithFields(log.Fields{"n": nSent + 1}).Debug("Sending unsolicited ARP/NA")
+		var errs []error
+		if arpSender != nil {
+			if err := arpSender.Send(); err != nil {
+				log.G(ctx).WithError(err).Warn("Failed to send unsolicited ARP")
+				errs = append(errs, err)
+			}
+		}
+		if naSender != nil {
+			if err := naSender.Send(); err != nil {
+				log.G(ctx).WithError(err).Warn("Failed to send unsolicited NA")
+				errs = append(errs, err)
+			}
+		}
+		return stderrors.Join(errs...)
 	}
 
-	// Send an initial message. If this fails, skip the resends.
-	if err := triggerSend(ctx, 0); err != nil {
-		log.G(ctx).WithError(err).Warn("Could not trigger gratuitous ARP/NA")
+	// Send an initial message. If it fails, skip the resends.
+	if send(ctx, 0) != nil || i.advAddrCount == 1 {
 		return
 	}
-	if i.advAddrCount == 1 {
-		return
-	}
+	// Don't clean up on return from this function, there are more ARPs/NAs to send.
+	stillSending = true
 
+	// Send the rest in the background.
 	go func() {
+		defer cleanup()
 		ctx, span := otel.Tracer("").Start(context.WithoutCancel(ctx), "libnetwork.osl.advertiseAddrs")
 		defer span.End()
 		ticker := time.NewTicker(i.advAddrInterval)
@@ -475,13 +516,37 @@ func advertiseAddrs(ctx context.Context, ifIndex int, i *Interface, nlh nlwrap.H
 				log.G(ctx).Info("Gratuitous ARP/NA cancelled")
 				return
 			case <-ticker.C:
-				if err := triggerSend(ctx, nSent); err != nil {
-					log.G(ctx).WithError(err).Warn("Could not trigger gratuitous ARP/NA")
+				if send(ctx, nSent) != nil {
 					return
 				}
 			}
 		}
 	}()
+}
+
+func (n *Namespace) prepAdvertiseAddrs(ctx context.Context, i *Interface, ifIndex int) (*l2disco.UnsolARP, *l2disco.UnsolNA) {
+	var ua *l2disco.UnsolARP
+	var un *l2disco.UnsolNA
+	if err := n.InvokeFunc(func() {
+		if i.address != nil {
+			var err error
+			ua, err = l2disco.NewUnsolARP(i.Address().IP, i.MacAddress(), ifIndex)
+			if err != nil {
+				log.G(ctx).WithError(err).Warn("Failed to prepare unsolicited ARP")
+			}
+		}
+		if i.addressIPv6 != nil {
+			var err error
+			un, err = l2disco.NewUnsolNA(i.AddressIPv6().IP, i.MacAddress(), ifIndex)
+			if err != nil {
+				log.G(ctx).WithError(err).Warn("Failed to prepare unsolicited NA")
+			}
+		}
+	}); err != nil {
+		log.G(ctx).WithError(err).Warn("Failed to prepare unsolicited ARP/NA messages")
+		return nil, nil
+	}
+	return ua, un
 }
 
 // ValidateAdvAddrCount returns an error if count is not within the allowed

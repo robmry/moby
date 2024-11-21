@@ -2,6 +2,7 @@ package networking
 
 import (
 	"context"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"net"
@@ -1285,18 +1286,27 @@ func TestAdvertiseAddresses(t *testing.T) {
 			ctx := testutil.StartSpan(ctx, t)
 
 			const netName = "dsnet"
+			const brName = "br-advaddr"
+			const brAddr6 = "fd3c:e70a:962c::1"
 			netOpts := append([]func(*networktypes.CreateOptions){
+				network.WithOption(bridge.BridgeName, brName),
 				network.WithIPv6(),
 				network.WithIPAM("172.22.22.0/24", "172.22.22.1"),
-				network.WithIPAM("fd3c:e70a:962c::/64", "fd3c:e70a:962c::1"),
+				network.WithIPAM("fd3c:e70a:962c::/64", brAddr6),
 			}, tc.netOpts...)
 			network.CreateNoError(ctx, t, c, netName, netOpts...)
 			defer network.RemoveNoError(ctx, t, c, netName)
 			const ctr2Addr4 = "172.22.22.22"
 			const ctr2Addr6 = "fd3c:e70a:962c::2222"
 
+			stopARPListen := network.CollectBcastARPs(t, brName)
+			defer stopARPListen()
+			stopICMP6Listen := network.CollectICMP6(t, brName)
+			defer stopICMP6Listen()
+
 			ctr1Id := container.Run(ctx, t, c, container.WithName("ctr1"), container.WithNetworkMode(netName))
 			defer c.ContainerRemove(ctx, ctr1Id, containertypes.RemoveOptions{Force: true})
+
 			const ctr2Name = "ctr2"
 			ctr2Id := container.Run(ctx, t, c,
 				container.WithName(ctr2Name),
@@ -1316,6 +1326,7 @@ func TestAdvertiseAddresses(t *testing.T) {
 			// Search the output from "ip neigh show" for entries for ip, return
 			// the associated MAC address.
 			getMAC := func(neighOut, ip string) string {
+				t.Helper()
 				for _, line := range strings.Split(neighOut, "\n") {
 					// Lines look like ...
 					// 172.22.22.22 dev eth0 lladdr 36:bc:ce:67:f3:e4 ref 1 used 0/7/0 probes 1 DELAY
@@ -1324,18 +1335,22 @@ func TestAdvertiseAddresses(t *testing.T) {
 						return fields[4]
 					}
 				}
-				t.Fatalf("No entry for %s in %s", ip, neighOut)
+				t.Fatalf("No entry for %s in '%s'", ip, neighOut)
 				return ""
 			}
 
 			// ctr1 should now have arp/neighbour entries for ctr2
 			neighRes := container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
 			assert.Assert(t, is.Equal(neighRes.ExitCode, 0))
+			t.Log("INITIAL", neighRes.Combined())
 			macBefore := getMAC(neighRes.Stdout(), ctr2Addr4)
 			assert.Equal(t, macBefore, getMAC(neighRes.Stdout(), ctr2Addr6))
 
 			// Stop ctr2, start a new container with the same addresses.
 			c.ContainerRemove(ctx, ctr2Id, containertypes.RemoveOptions{Force: true})
+			neighRes = container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
+			assert.Assert(t, is.Equal(neighRes.ExitCode, 0))
+			t.Log("AFTER STOP", neighRes.Combined())
 			ctr2Id = container.Run(ctx, t, c,
 				container.WithName(ctr2Name),
 				container.WithNetworkMode(netName),
@@ -1346,8 +1361,9 @@ func TestAdvertiseAddresses(t *testing.T) {
 
 			neighRes = container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
 			assert.Assert(t, is.Equal(neighRes.ExitCode, 0))
+			t.Log("AFTER RESTART", neighRes.Combined())
 			macAfter := getMAC(neighRes.Stdout(), ctr2Addr4)
-			assert.Equal(t, macAfter, getMAC(neighRes.Stdout(), ctr2Addr6))
+			assert.Check(t, is.Equal(macAfter, getMAC(neighRes.Stdout(), ctr2Addr6)))
 			if tc.expMACUpdate {
 				// The new ctr2's interface should have a new random MAC address, and ctr1's
 				// arp/neigh caches should have been updated by ctr2's gratuitous ARP/NA.
@@ -1355,6 +1371,28 @@ func TestAdvertiseAddresses(t *testing.T) {
 			} else {
 				// The neighbour table shouldn't have changed.
 				assert.Check(t, macBefore == macAfter, "Expected ctr1's ARP/ND cache not to have updated")
+			}
+
+			t.Log("Sleeping for 5s to collect ARP/NA messages...")
+			time.Sleep(5 * time.Second)
+
+			arps := stopARPListen()
+			icmps := stopICMP6Listen()
+			t.Logf("Received %d arps, %d nas", len(arps), len(icmps))
+			for i, arp := range arps {
+				if sh, _, sp, _, err := arp.UnpackEth(); err == nil {
+					t.Logf("ARP %d: %s '%s' is at '%s'",
+						i+1, arp.Timestamp.Format("15:04:05.000"), sp, sh)
+				}
+			}
+			for i, icmp := range icmps {
+				if th, tp, err := icmp.UnpackUnsolNA(t); err != nil {
+					t.Logf("ICMP6 %d: %s: %s: %s",
+						i+1, icmp.Timestamp.Format("15:04:05.000"), hex.EncodeToString(icmp.Data), err)
+				} else {
+					t.Logf("ICMP6 %d: %s: '%s' is at '%s'",
+						i+1, icmp.Timestamp.Format("15:04:05.000"), tp, th)
+				}
 			}
 		})
 	}
