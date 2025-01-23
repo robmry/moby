@@ -504,7 +504,18 @@ func (n *Namespace) advertiseAddrs(ctx context.Context, ifIndex int, i *Interfac
 
 	// Send an initial message. If it fails, skip the resends.
 	if err := send(ctx); err != nil {
-		return err
+		log.G(ctx).WithError(err).Error("Failed to send unsolicited ARP/NA - will retry ...")
+		// Temp debug ...
+		err = fmt.Errorf("ns:%q: %w", n.path, err)
+		for retry := range 3 {
+			time.Sleep(100 * time.Millisecond)
+			retryErr := send(ctx)
+			if retryErr == nil {
+				return fmt.Errorf("success on retry %d, after:%w", retry, err)
+			}
+			log.G(ctx).WithError(retryErr).Errorf("Failed on retry %d", retry)
+		}
+		return fmt.Errorf("failed after retries: %w", err)
 	}
 	if i.advertiseAddrNMsgs == 1 {
 		return nil
