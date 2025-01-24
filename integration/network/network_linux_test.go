@@ -448,6 +448,12 @@ func TestMixL3IPVlanAndBridge(t *testing.T) {
 			c := d.NewClientT(t)
 			defer c.Close()
 
+			defer func() {
+				if t.Failed() {
+					d.TailLogsT(t, 100)
+				}
+			}()
+
 			const br46NetName = "br46net"
 			network.CreateNoError(ctx, t, c, br46NetName,
 				network.WithOption(netlabel.ContainerIfacePrefix, "bds"),
