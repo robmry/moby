@@ -1368,174 +1368,179 @@ func TestAdvertiseAddresses(t *testing.T) {
 		},
 	}
 
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := testutil.StartSpan(ctx, t)
+	for range 10 {
+		for _, tc := range testcases {
+			t.Run(tc.name, func(t *testing.T) {
+				ctx := testutil.StartSpan(ctx, t)
 
-			const netName = "dsnet"
-			const brName = "br-advaddr"
-			netOpts := append([]func(*networktypes.CreateOptions){
-				network.WithOption(bridge.BridgeName, brName),
-				network.WithIPv6(),
-				network.WithIPAM("172.22.22.0/24", "172.22.22.1"),
-			}, tc.netOpts...)
-			if tc.ipv6LinkLocal {
-				netOpts = append(netOpts, network.WithIPAM("fe80:1234::/64", "fe80:1234::1"))
-			} else {
-				netOpts = append(netOpts, network.WithIPAM("fd3c:e70a:962c::/64", "fd3c:e70a:962c::1"))
-			}
-			_, err := network.Create(ctx, c, netName, netOpts...)
-			if tc.expNetCreateErr != "" {
-				assert.ErrorContains(t, err, tc.expNetCreateErr)
-				return
-			}
-			defer network.RemoveNoError(ctx, t, c, netName)
-
-			stopARPListen := network.CollectBcastARPs(t, brName)
-			defer stopARPListen()
-			stopICMP6Listen := network.CollectICMP6(t, brName)
-			defer stopICMP6Listen()
-
-			ctr1Id := container.Run(ctx, t, c, container.WithName("ctr1"), container.WithNetworkMode(netName))
-			defer c.ContainerRemove(ctx, ctr1Id, containertypes.RemoveOptions{Force: true})
-
-			const ctr2Name = "ctr2"
-			const ctr2Addr4 = "172.22.22.22"
-			ctr2Addr6 := "fd3c:e70a:962c::2222"
-			if tc.ipv6LinkLocal {
-				ctr2Addr6 = "fe80:1234::2222"
-			}
-			ctr2Id := container.Run(ctx, t, c,
-				container.WithName(ctr2Name),
-				container.WithNetworkMode(netName),
-				container.WithIPv4(netName, ctr2Addr4),
-				container.WithIPv6(netName, ctr2Addr6),
-			)
-			// Defer a closure so the updated ctr2Id is used after the container's restarted.
-			defer func() {
-				if ctr2Id != "" {
-					c.ContainerRemove(ctx, ctr2Id, containertypes.RemoveOptions{Force: true})
+				const netName = "dsnet"
+				const brName = "br-advaddr"
+				netOpts := append([]func(*networktypes.CreateOptions){
+					network.WithOption(bridge.BridgeName, brName),
+					network.WithIPv6(),
+					network.WithIPAM("172.22.22.0/24", "172.22.22.1"),
+				}, tc.netOpts...)
+				if tc.ipv6LinkLocal {
+					netOpts = append(netOpts, network.WithIPAM("fe80:1234::/64", "fe80:1234::1"))
+				} else {
+					netOpts = append(netOpts, network.WithIPAM("fd3c:e70a:962c::/64", "fd3c:e70a:962c::1"))
 				}
-			}()
+				_, err := network.Create(ctx, c, netName, netOpts...)
+				if tc.expNetCreateErr != "" {
+					assert.ErrorContains(t, err, tc.expNetCreateErr)
+					return
+				}
+				defer network.RemoveNoError(ctx, t, c, netName)
 
-			ctr2OrigMAC := container.Inspect(ctx, t, c, ctr2Id).NetworkSettings.Networks[netName].MacAddress
+				stopARPListen := network.CollectBcastARPs(t, brName)
+				defer stopARPListen()
+				stopICMP6Listen := network.CollectICMP6(t, brName)
+				defer stopICMP6Listen()
 
-			// Ping from ctr1 to ctr2 using both IPv4 and IPv6, to populate ctr1's arp/neighbour caches.
-			pingRes := container.ExecT(ctx, t, c, ctr1Id, []string{"ping", "-4", "-c1", ctr2Name})
-			assert.Assert(t, is.Equal(pingRes.ExitCode, 0))
-			pingRes = container.ExecT(ctx, t, c, ctr1Id, []string{"ping", "-6", "-c1", ctr2Name})
-			assert.Assert(t, is.Equal(pingRes.ExitCode, 0))
+				ctr1Id := container.Run(ctx, t, c, container.WithName("ctr1"), container.WithNetworkMode(netName))
+				defer c.ContainerRemove(ctx, ctr1Id, containertypes.RemoveOptions{Force: true})
 
-			// Search the output from "ip neigh show" for entries for ip, return
-			// the associated MAC address.
-			findNeighMAC := func(neighOut, ip string) string {
-				t.Helper()
-				for _, line := range strings.Split(neighOut, "\n") {
-					// Lines look like ...
-					// 172.22.22.22 dev eth0 lladdr 36:bc:ce:67:f3:e4 ref 1 used 0/7/0 probes 1 DELAY
-					fields := strings.Fields(line)
-					if len(fields) >= 5 && fields[0] == ip {
-						return fields[4]
+				const ctr2Name = "ctr2"
+				const ctr2Addr4 = "172.22.22.22"
+				ctr2Addr6 := "fd3c:e70a:962c::2222"
+				if tc.ipv6LinkLocal {
+					ctr2Addr6 = "fe80:1234::2222"
+				}
+				ctr2Id := container.Run(ctx, t, c,
+					container.WithName(ctr2Name),
+					container.WithNetworkMode(netName),
+					container.WithIPv4(netName, ctr2Addr4),
+					container.WithIPv6(netName, ctr2Addr6),
+				)
+				// Defer a closure so the updated ctr2Id is used after the container's restarted.
+				defer func() {
+					if ctr2Id != "" {
+						c.ContainerRemove(ctx, ctr2Id, containertypes.RemoveOptions{Force: true})
 					}
+				}()
+
+				ctr2OrigMAC := container.Inspect(ctx, t, c, ctr2Id).NetworkSettings.Networks[netName].MacAddress
+
+				// Ping from ctr1 to ctr2 using both IPv4 and IPv6, to populate ctr1's arp/neighbour caches.
+				pingRes := container.ExecT(ctx, t, c, ctr1Id, []string{"ping", "-4", "-c1", ctr2Name})
+				assert.Assert(t, is.Equal(pingRes.ExitCode, 0))
+				pingRes = container.ExecT(ctx, t, c, ctr1Id, []string{"ping", "-6", "-c1", ctr2Name})
+				assert.Assert(t, is.Equal(pingRes.ExitCode, 0))
+
+				// Search the output from "ip neigh show" for entries for ip, return
+				// the associated MAC address.
+				findNeighMAC := func(neighOut, ip string) string {
+					t.Helper()
+					for _, line := range strings.Split(neighOut, "\n") {
+						// Lines look like ...
+						// 172.22.22.22 dev eth0 lladdr 36:bc:ce:67:f3:e4 ref 1 used 0/7/0 probes 1 DELAY
+						fields := strings.Fields(line)
+						if len(fields) >= 5 && fields[0] == ip {
+							return fields[4]
+						}
+					}
+					t.Fatalf("No entry for %s in '%s'", ip, neighOut)
+					return ""
 				}
-				t.Fatalf("No entry for %s in '%s'", ip, neighOut)
-				return ""
-			}
 
-			// ctr1 should now have arp/neighbour entries for ctr2
-			ctr1Neighs := container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
-			assert.Assert(t, is.Equal(ctr1Neighs.ExitCode, 0))
-			t.Logf("ctr1 initial neighbours:\n%s", ctr1Neighs.Combined())
-			macBefore := findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr4)
-			assert.Equal(t, macBefore, findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr6))
+				// ctr1 should now have arp/neighbour entries for ctr2
+				ctr1Neighs := container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
+				assert.Assert(t, is.Equal(ctr1Neighs.ExitCode, 0))
+				t.Logf("ctr1 initial neighbours:\n%s", ctr1Neighs.Combined())
+				macBefore := findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr4)
+				assert.Equal(t, macBefore, findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr6))
 
-			// Stop ctr2, start a new container with the same addresses.
-			c.ContainerRemove(ctx, ctr2Id, containertypes.RemoveOptions{Force: true})
-			ctr1Neighs = container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
-			assert.Assert(t, is.Equal(ctr1Neighs.ExitCode, 0))
-			t.Logf("ctr1 neighbours after ctr2 stop:\n%s", ctr1Neighs.Combined())
-			ctr2Id = container.Run(ctx, t, c,
-				container.WithName(ctr2Name),
-				container.WithNetworkMode(netName),
-				container.WithIPv4(netName, ctr2Addr4),
-				container.WithIPv6(netName, ctr2Addr6),
-			)
-			// The original defer will stop ctr2Id.
-
-			ctr2NewMAC := container.Inspect(ctx, t, c, ctr2Id).NetworkSettings.Networks[netName].MacAddress
-			assert.Check(t, ctr2OrigMAC != ctr2NewMAC, "expected restarted ctr2 to have a different MAC address")
-
-			ctr1Neighs = container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
-			assert.Assert(t, is.Equal(ctr1Neighs.ExitCode, 0))
-			t.Logf("ctr1 neighbours after ctr2 restart:\n%s", ctr1Neighs.Combined())
-			macAfter := findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr4)
-			assert.Check(t, is.Equal(macAfter, findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr6)))
-			if tc.expNoMACUpdate {
-				// The neighbour table shouldn't have changed.
-				assert.Check(t, macBefore == macAfter, "Expected ctr1's ARP/ND cache not to have updated")
-			} else {
-				// The new ctr2's interface should have a new random MAC address, and ctr1's
-				// arp/neigh caches should have been updated by ctr2's gratuitous ARP/NA.
-				assert.Check(t, macBefore != macAfter, "Expected ctr1's ARP/ND cache to have updated")
-			}
-
-			if tc.stopCtr2After > 0 {
-				time.Sleep(tc.stopCtr2After)
+				// Stop ctr2, start a new container with the same addresses.
 				c.ContainerRemove(ctx, ctr2Id, containertypes.RemoveOptions{Force: true})
-				ctr2Id = ""
-			}
+				ctr1Neighs = container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
+				assert.Assert(t, is.Equal(ctr1Neighs.ExitCode, 0))
+				t.Logf("ctr1 neighbours after ctr2 stop:\n%s", ctr1Neighs.Combined())
+				ctr2Id = container.Run(ctx, t, c,
+					container.WithName(ctr2Name),
+					container.WithNetworkMode(netName),
+					container.WithIPv4(netName, ctr2Addr4),
+					container.WithIPv6(netName, ctr2Addr6),
+				)
+				// The original defer will stop ctr2Id.
 
-			t.Log("Sleeping for 5s to collect ARP/NA messages...")
-			time.Sleep(5 * time.Second)
+				ctr2NewMAC := container.Inspect(ctx, t, c, ctr2Id).NetworkSettings.Networks[netName].MacAddress
+				assert.Check(t, ctr2OrigMAC != ctr2NewMAC, "expected restarted ctr2 to have a different MAC address")
 
-			// Check ARP/NA messages received for ctr2's new address (all unsolicited).
-
-			ctr2NewHwAddr, err := net.ParseMAC(ctr2NewMAC)
-			assert.NilError(t, err)
-
-			checkPkts := func(pktDesc string, pkts []network.TimestampedPkt, matchIP netip.Addr, unpack func(pkt network.TimestampedPkt) (sh net.HardwareAddr, sp netip.Addr, err error)) {
-				t.Helper()
-				var count int
-				var lastTimestamp time.Time
-
-				// Find the packets of-interest, and check the intervals between them.
-				for i, p := range pkts {
-					ha, pa, err := unpack(p)
-					if err != nil {
-						t.Logf("%s %d: %s: %s: %s",
-							pktDesc, i+1, p.ReceivedAt.Format("15:04:05.000"), hex.EncodeToString(p.Data), err)
-						continue
-					}
-					t.Logf("%s %d: %s '%s' is at '%s'", pktDesc, i+1, p.ReceivedAt.Format("15:04:05.000"), pa, ha)
-					if pa != matchIP || slices.Compare(ha, ctr2NewHwAddr) != 0 {
-						continue
-					}
-					count += 1
-					var interval time.Duration
-					if !lastTimestamp.IsZero() {
-						interval = p.ReceivedAt.Sub(lastTimestamp)
-						// For test pass/fail, arbitrary limit on how early or late ARP/NA messages can be.
-						// They should never be sent early, but if there's a delay in receiving one packet
-						// the interval to the next may be shorted than the configured interval.
-						// Send variance should be a lot less than this but, this is enough to check that
-						// the interval is configurable, while (hopefully) avoiding flakiness on a busy host ...
-						const okIntervalDelta = 100 * time.Millisecond
-						assert.Check(t, time.Duration(math.Abs(float64(interval-tc.expInterval))) < okIntervalDelta,
-							"interval %s is expected to be within %s of configured interval %s",
-							interval, okIntervalDelta, tc.expInterval)
-					}
-					t.Logf("---> found %s %d, interval:%s", pktDesc, count, interval)
-					lastTimestamp = p.ReceivedAt
+				ctr1Neighs = container.ExecT(ctx, t, c, ctr1Id, []string{"ip", "neigh", "show"})
+				assert.Assert(t, is.Equal(ctr1Neighs.ExitCode, 0))
+				t.Logf("ctr1 neighbours after ctr2 restart:\n%s", ctr1Neighs.Combined())
+				macAfter := findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr4)
+				assert.Check(t, is.Equal(macAfter, findNeighMAC(ctr1Neighs.Stdout(), ctr2Addr6)))
+				if tc.expNoMACUpdate {
+					// The neighbour table shouldn't have changed.
+					assert.Check(t, macBefore == macAfter, "Expected ctr1's ARP/ND cache not to have updated")
+				} else {
+					// The new ctr2's interface should have a new random MAC address, and ctr1's
+					// arp/neigh caches should have been updated by ctr2's gratuitous ARP/NA.
+					assert.Check(t, macBefore != macAfter, "Expected ctr1's ARP/ND cache to have updated")
 				}
 
-				assert.Check(t, is.Equal(count, tc.expNMsgs), pktDesc+" message count")
-			}
+				if tc.stopCtr2After > 0 {
+					time.Sleep(tc.stopCtr2After)
+					c.ContainerRemove(ctx, ctr2Id, containertypes.RemoveOptions{Force: true})
+					ctr2Id = ""
+				}
 
-			arps := stopARPListen()
-			checkPkts("ARP", arps, netip.MustParseAddr(ctr2Addr4), network.UnpackUnsolARP)
+				t.Log("Sleeping for 5s to collect ARP/NA messages...")
+				time.Sleep(5 * time.Second)
 
-			icmps := stopICMP6Listen()
-			checkPkts("ICMP6", icmps, netip.MustParseAddr(ctr2Addr6), network.UnpackUnsolNA)
-		})
+				// Check ARP/NA messages received for ctr2's new address (all unsolicited).
+
+				ctr2NewHwAddr, err := net.ParseMAC(ctr2NewMAC)
+				assert.NilError(t, err)
+
+				checkPkts := func(pktDesc string, pkts []network.TimestampedPkt, matchIP netip.Addr, unpack func(pkt network.TimestampedPkt) (sh net.HardwareAddr, sp netip.Addr, err error)) {
+					t.Helper()
+					var count int
+					var lastTimestamp time.Time
+
+					// Find the packets of-interest, and check the intervals between them.
+					for i, p := range pkts {
+						ha, pa, err := unpack(p)
+						if err != nil {
+							t.Logf("%s %d: %s: %s: %s",
+								pktDesc, i+1, p.ReceivedAt.Format("15:04:05.000"), hex.EncodeToString(p.Data), err)
+							continue
+						}
+						t.Logf("%s %d: %s '%s' is at '%s'", pktDesc, i+1, p.ReceivedAt.Format("15:04:05.000"), pa, ha)
+						if pa != matchIP || slices.Compare(ha, ctr2NewHwAddr) != 0 {
+							continue
+						}
+						count += 1
+						var interval time.Duration
+						if !lastTimestamp.IsZero() {
+							interval = p.ReceivedAt.Sub(lastTimestamp)
+							// For test pass/fail, arbitrary limit on how early or late ARP/NA messages can be.
+							// They should never be sent early, but if there's a delay in receiving one packet
+							// the interval to the next may be shorted than the configured interval.
+							// Send variance should be a lot less than this but, this is enough to check that
+							// the interval is configurable, while (hopefully) avoiding flakiness on a busy host ...
+							const okIntervalDelta = 100 * time.Millisecond
+							assert.Check(t, time.Duration(math.Abs(float64(interval-tc.expInterval))) < okIntervalDelta,
+								"interval %s is expected to be within %s of configured interval %s",
+								interval, okIntervalDelta, tc.expInterval)
+						}
+						t.Logf("---> found %s %d, interval:%s", pktDesc, count, interval)
+						lastTimestamp = p.ReceivedAt
+					}
+
+					assert.Check(t, is.Equal(count, tc.expNMsgs), pktDesc+" message count")
+				}
+
+				arps := stopARPListen()
+				checkPkts("ARP", arps, netip.MustParseAddr(ctr2Addr4), network.UnpackUnsolARP)
+
+				icmps := stopICMP6Listen()
+				checkPkts("ICMP6", icmps, netip.MustParseAddr(ctr2Addr6), network.UnpackUnsolNA)
+				if t.Failed() {
+					d.TailLogsT(t, 100)
+				}
+			})
+		}
 	}
 }
