@@ -10,17 +10,16 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/docker/docker/libnetwork/drivers/bridge/internal/pktfilter"
-
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
-	"github.com/docker/docker/internal/modprobe"
 	"github.com/docker/docker/internal/nlwrap"
 	"github.com/docker/docker/libnetwork/datastore"
 	"github.com/docker/docker/libnetwork/driverapi"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/iptables"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/pktfilter"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/rlkclient"
 	"github.com/docker/docker/libnetwork/internal/netiputil"
+	lniptables "github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/netlabel"
 	"github.com/docker/docker/libnetwork/netutils"
 	"github.com/docker/docker/libnetwork/ns"
@@ -33,7 +32,6 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -49,11 +47,6 @@ const (
 	DefaultGatewayV4AuxKey = "DefaultGatewayIPv4"
 	// DefaultGatewayV6AuxKey represents the ipv6 default-gateway configured by the user
 	DefaultGatewayV6AuxKey = "DefaultGatewayIPv6"
-)
-
-type (
-	iptableCleanFunc   func() error
-	iptablesCleanFuncs []iptableCleanFunc
 )
 
 // configuration info for the "bridge" driver.
@@ -133,12 +126,12 @@ type bridgeEndpoint struct {
 }
 
 type bridgeNetwork struct {
-	id            string
-	bridge        *bridgeInterface // The bridge's L3 interface
-	config        *networkConfiguration
-	endpoints     map[string]*bridgeEndpoint // key: endpoint id
-	driver        *driver                    // The network's driver
-	iptCleanFuncs iptablesCleanFuncs
+	id        string
+	bridge    *bridgeInterface // The bridge's L3 interface
+	config    *networkConfiguration
+	endpoints map[string]*bridgeEndpoint // key: endpoint id
+	driver    *driver                    // The network's driver
+	pktFilter pktfilter.Network
 	sync.Mutex
 }
 
@@ -393,10 +386,6 @@ func (m gwMode) isolated() bool {
 
 func parseErr(label, value, errString string) error {
 	return types.InvalidParameterErrorf("failed to parse %s value: %v (%s)", label, value, errString)
-}
-
-func (n *bridgeNetwork) registerIptCleanFunc(clean iptableCleanFunc) {
-	n.iptCleanFuncs = append(n.iptCleanFuncs, clean)
 }
 
 func (n *bridgeNetwork) getNetworkBridgeName() string {
@@ -903,7 +892,47 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		}
 	}
 
-	// Apply the prepared list of steps, and abort at the first error.
+	bridgeSetup.queueStep(func(config *networkConfiguration, i *bridgeInterface) error {
+		h4, ok := netip.AddrFromSlice(config.HostIPv4)
+		if !ok {
+			return fmt.Errorf("invalid host IPv4 address %q", config.HostIPv4)
+		}
+		p4, ok := netiputil.ToPrefix(i.bridgeIPv4)
+		if !ok {
+			return fmt.Errorf("invalid IPv4 prefix %s", i.bridgeIPv4)
+		}
+		h6, ok := netip.AddrFromSlice(config.HostIPv6)
+		if !ok {
+			return fmt.Errorf("invalid host IPv4 address %q", config.HostIPv4)
+		}
+		p6, ok := netiputil.ToPrefix(i.bridgeIPv6)
+		if !ok {
+			return fmt.Errorf("invalid IPv6 prefix %s", i.bridgeIPv6)
+		}
+		pfn, err := d.pktFilter.AddNetwork(pktfilter.NetworkConfig{
+			IfName:   config.BridgeName,
+			Internal: config.Internal,
+			ICC:      config.EnableICC,
+			Config4: pktfilter.NetworkConfigFam{
+				HostIP:      h4,
+				Prefix:      p4.Masked(),
+				Routed:      network.gwMode(pktfilter.IPv4).routed(),
+				Unprotected: network.gwMode(pktfilter.IPv4).unprotected(),
+			},
+			Config6: pktfilter.NetworkConfigFam{
+				HostIP:      h6,
+				Prefix:      p6.Masked(),
+				Routed:      network.gwMode(pktfilter.IPv6).routed(),
+				Unprotected: network.gwMode(pktfilter.IPv6).unprotected(),
+			},
+		})
+		if err != nil {
+			return err
+		}
+		network.pktFilter = pfn
+		return nil
+	})
+
 	bridgeSetup.queueStep(setupDeviceUp)
 
 	if v := os.Getenv("DOCKER_TEST_BRIDGE_INIT_ERROR"); v == config.BridgeName {
@@ -912,6 +941,7 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		})
 	}
 
+	// Apply the prepared list of steps, and abort at the first error.
 	return bridgeSetup.apply()
 }
 

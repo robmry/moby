@@ -1,6 +1,9 @@
 package pktfilter
 
-import "context"
+import (
+	"context"
+	"net/netip"
+)
 
 type IPVersion int
 
@@ -9,13 +12,33 @@ const (
 	IPv6
 )
 
-type PktFilter interface {
-	Init(ctx context.Context, config Config) error
-	Enabled(version IPVersion) (bool, error)
-}
-
 type Config struct {
 	IPv4    bool
 	IPv6    bool
 	Hairpin bool
 }
+
+type NetworkConfigFam struct {
+	HostIP      netip.Addr
+	Prefix      netip.Prefix
+	Routed      bool
+	Unprotected bool
+}
+
+type NetworkConfig struct {
+	IfName       string
+	Internal     bool
+	ICC          bool
+	IPMasquerade bool
+	Config4      NetworkConfigFam
+	Config6      NetworkConfigFam
+}
+
+type PktFilter interface {
+	Init(ctx context.Context, config Config) error
+	Enabled(version IPVersion) (bool, error)
+
+	AddNetwork(nc NetworkConfig) (Network, error)
+}
+
+type Network interface{}

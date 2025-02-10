@@ -15,8 +15,6 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/docker/docker/libnetwork/drivers/bridge/internal/pktfilter"
-
 	"github.com/containerd/log"
 	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/netutils"
@@ -772,12 +770,12 @@ func (n *bridgeNetwork) setPerPortIptables(b portBinding, enable bool) error {
 		// additional iptables rules are required.
 		return nil
 	}
-	v := pktfilter.IPv4
+	v := iptables.IPv4
 	if b.IP.To4() == nil {
-		v = pktfilter.IPv6
+		v = iptables.IPv6
 	}
 
-	if enabled, err := n.driver.pktFilter.Enabled(v); err != nil || !enabled {
+	if enabled, err := n.iptablesEnabled(v); err != nil || !enabled {
 		// Nothing to do, iptables/ip6tables is not enabled.
 		return nil
 	}
@@ -796,7 +794,7 @@ func (n *bridgeNetwork) setPerPortIptables(b portBinding, enable bool) error {
 	return nil
 }
 
-func setPerPortNAT(b portBinding, ipv pktfilter.IPVersion, proxyPath string, bridgeName string, enable bool) error {
+func setPerPortNAT(b portBinding, ipv iptables.IPVersion, proxyPath string, bridgeName string, enable bool) error {
 	if b.HostPort == 0 {
 		// NAT is disabled.
 		return nil
@@ -841,7 +839,7 @@ func setPerPortNAT(b portBinding, ipv pktfilter.IPVersion, proxyPath string, bri
 	return nil
 }
 
-func setPerPortForwarding(b portBinding, ipv pktfilter.IPVersion, bridgeName string, enable bool) error {
+func setPerPortForwarding(b portBinding, ipv iptables.IPVersion, bridgeName string, enable bool) error {
 	// Insert rules for open ports at the top of the filter table's DOCKER
 	// chain (a per-network DROP rule, which must come after these per-port
 	// per-container ACCEPT rules, is appended to the chain when the network

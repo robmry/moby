@@ -1,11 +1,14 @@
-package bridge
+package iptables
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
+
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/pktfilter"
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
@@ -16,72 +19,55 @@ import (
 	"github.com/vishvananda/netlink/nl"
 )
 
-func (n *bridgeNetwork) setupIP4Tables(config *networkConfiguration, i *bridgeInterface) error {
-	d := n.driver
-	d.Lock()
-	driverConfig := d.config
-	d.Unlock()
-
-	// Sanity check.
-	if !driverConfig.EnableIPTables {
-		return errors.New("Cannot program chains, EnableIPTable is disabled")
-	}
-
-	maskedAddrv4 := &net.IPNet{
-		IP:   i.bridgeIPv4.IP.Mask(i.bridgeIPv4.Mask),
-		Mask: i.bridgeIPv4.Mask,
-	}
-	return n.setupIPTables(iptables.IPv4, maskedAddrv4, config, i)
+type network struct {
+	pktfilter.NetworkConfig
+	cleanFuncs iptablesCleanFuncs
+	ipt        *IPTables
 }
 
-func (n *bridgeNetwork) setupIP6Tables(config *networkConfiguration, i *bridgeInterface) error {
-	d := n.driver
-	d.Lock()
-	driverConfig := d.config
-	d.Unlock()
+type (
+	iptableCleanFunc   func() error
+	iptablesCleanFuncs []iptableCleanFunc
+)
 
-	// Sanity check.
-	if !driverConfig.EnableIP6Tables {
-		return errors.New("Cannot program chains, EnableIP6Tables is disabled")
+func (ipt *IPTables) AddNetwork(nc pktfilter.NetworkConfig) (pktfilter.Network, error) {
+	n := &network{
+		NetworkConfig: nc,
+		ipt:           ipt,
 	}
-
-	maskedAddrv6 := &net.IPNet{
-		IP:   i.bridgeIPv6.IP.Mask(i.bridgeIPv6.Mask),
-		Mask: i.bridgeIPv6.Mask,
+	if ipt.config.IPv4 {
+		if err := n.setupIPTables(iptables.IPv4, n.Config4, ipsetExtBridges4); err != nil {
+			return nil, err
+		}
 	}
-
-	return n.setupIPTables(iptables.IPv6, maskedAddrv6, config, i)
+	if ipt.config.IPv6 {
+		if err := n.setupIPTables(iptables.IPv6, n.Config6, ipsetExtBridges6); err != nil {
+			return nil, err
+		}
+	}
+	return n, nil
 }
 
-func (n *bridgeNetwork) setupIPTables(ipVersion iptables.IPVersion, maskedAddr *net.IPNet, config *networkConfiguration, i *bridgeInterface) error {
+func (n *network) registerIptCleanFunc(clean iptableCleanFunc) {
+	n.cleanFuncs = append(n.cleanFuncs, clean)
+}
+
+func (n *network) setupIPTables(ipVersion iptables.IPVersion, config pktfilter.NetworkConfigFam, ipsetName string) error {
 	var err error
 
-	d := n.driver
-	d.Lock()
-	driverConfig := d.config
-	d.Unlock()
-
-	// Pickup this configuration option from driver
-	hairpinMode := !driverConfig.EnableUserlandProxy
-
-	ipsetName := ipsetExtBridges4
-	if ipVersion == iptables.IPv6 {
-		ipsetName = ipsetExtBridges6
-	}
-
-	if config.Internal {
-		if err = setupInternalNetworkRules(config.BridgeName, maskedAddr, config.EnableICC, true); err != nil {
+	if n.Internal {
+		if err = setupInternalNetworkRules(n.IfName, config.Prefix, n.ICC, true); err != nil {
 			return fmt.Errorf("Failed to Setup IP tables: %w", err)
 		}
 		n.registerIptCleanFunc(func() error {
-			return setupInternalNetworkRules(config.BridgeName, maskedAddr, config.EnableICC, false)
+			return setupInternalNetworkRules(n.IfName, config.Prefix, n.ICC, false)
 		})
 	} else {
-		if err = setupNonInternalNetworkRules(ipVersion, config, maskedAddr, hairpinMode, true); err != nil {
+		if err = setupNonInternalNetworkRules(ipVersion, config, n.ipt.config.Hairpin, true); err != nil {
 			return fmt.Errorf("Failed to Setup IP tables: %w", err)
 		}
 		n.registerIptCleanFunc(func() error {
-			return setupNonInternalNetworkRules(ipVersion, config, maskedAddr, hairpinMode, false)
+			return setupNonInternalNetworkRules(ipVersion, config, n.ipt.config.Hairpin, false)
 		})
 
 		if err := iptables.AddInterfaceFirewalld(config.BridgeName); err != nil {
@@ -215,18 +201,11 @@ func (n *bridgeNetwork) setDefaultForwardRule(
 	return nil
 }
 
-func setupNonInternalNetworkRules(ipVer iptables.IPVersion, config *networkConfiguration, addr *net.IPNet, hairpin, enable bool) error {
-	hostIP := config.HostIPv4
-	nat := !config.GwModeIPv4.routed()
-	if ipVer == iptables.IPv6 {
-		hostIP = config.HostIPv6
-		nat = !config.GwModeIPv6.routed()
-	}
-
+func setupNonInternalNetworkRules(ipVer iptables.IPVersion, config pktfilter.NetworkConfigFam, hairpin, enable bool) error {
 	var natArgs, hpNatArgs []string
-	if hostIP != nil {
+	if config.HostIP.IsValid() {
 		// The user wants IPv4/IPv6 SNAT with the given address.
-		hostAddr := hostIP.String()
+		hostAddr := config.HostIP.String()
 		natArgs = []string{"-s", addr.String(), "!", "-o", config.BridgeName, "-j", "SNAT", "--to-source", hostAddr}
 		hpNatArgs = []string{"-m", "addrtype", "--src-type", "LOCAL", "-o", config.BridgeName, "-j", "SNAT", "--to-source", hostAddr}
 	} else {
@@ -238,6 +217,7 @@ func setupNonInternalNetworkRules(ipVer iptables.IPVersion, config *networkConfi
 	hpNatRule := iptables.Rule{IPVer: ipVer, Table: iptables.Nat, Chain: "POSTROUTING", Args: hpNatArgs}
 
 	// Set NAT.
+	nat := !config.Routed
 	if nat && config.EnableIPMasquerade {
 		if err := programChainRule(natRule, "NAT", enable); err != nil {
 			return err
@@ -401,7 +381,7 @@ func setINC(version iptables.IPVersion, iface string, gwm gwMode, enable bool) (
 	return nil
 }
 
-func setupInternalNetworkRules(bridgeIface string, addr *net.IPNet, icc, insert bool) error {
+func setupInternalNetworkRules(bridgeIface string, prefix netip.Prefix, icc, insert bool) error {
 	var version iptables.IPVersion
 	var inDropRule, outDropRule iptables.Rule
 
@@ -416,19 +396,19 @@ func setupInternalNetworkRules(bridgeIface string, addr *net.IPNet, icc, insert 
 		}
 	}
 
-	if addr.IP.To4() != nil {
+	if prefix.Addr().Is4() {
 		version = iptables.IPv4
 		inDropRule = iptables.Rule{
 			IPVer: version,
 			Table: iptables.Filter,
 			Chain: IsolationChain1,
-			Args:  []string{"-i", bridgeIface, "!", "-d", addr.String(), "-j", "DROP"},
+			Args:  []string{"-i", bridgeIface, "!", "-d", prefix.String(), "-j", "DROP"},
 		}
 		outDropRule = iptables.Rule{
 			IPVer: version,
 			Table: iptables.Filter,
 			Chain: IsolationChain1,
-			Args:  []string{"-o", bridgeIface, "!", "-s", addr.String(), "-j", "DROP"},
+			Args:  []string{"-o", bridgeIface, "!", "-s", prefix.String(), "-j", "DROP"},
 		}
 	} else {
 		version = iptables.IPv6
@@ -436,13 +416,13 @@ func setupInternalNetworkRules(bridgeIface string, addr *net.IPNet, icc, insert 
 			IPVer: version,
 			Table: iptables.Filter,
 			Chain: IsolationChain1,
-			Args:  []string{"-i", bridgeIface, "!", "-o", bridgeIface, "!", "-d", addr.String(), "-j", "DROP"},
+			Args:  []string{"-i", bridgeIface, "!", "-o", bridgeIface, "!", "-d", prefix.String(), "-j", "DROP"},
 		}
 		outDropRule = iptables.Rule{
 			IPVer: version,
 			Table: iptables.Filter,
 			Chain: IsolationChain1,
-			Args:  []string{"!", "-i", bridgeIface, "-o", bridgeIface, "!", "-s", addr.String(), "-j", "DROP"},
+			Args:  []string{"!", "-i", bridgeIface, "-o", bridgeIface, "!", "-s", prefix.String(), "-j", "DROP"},
 		}
 	}
 
