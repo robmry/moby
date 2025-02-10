@@ -3,20 +3,18 @@ package iptables
 import (
 	"context"
 	"net"
-	"net/netip"
 	"os"
 	"strconv"
 
 	"github.com/docker/docker/libnetwork/iptables"
-
 	"github.com/docker/docker/libnetwork/types"
 )
 
-func (n *network) AddPort(ctx context.Context, pb types.PortBinding, childHostIP netip.Addr) error {
-	if err := n.setPerPortIptables(b, true); err != nil {
+func (n *network) AddPort(ctx context.Context, b types.PortBinding, childHostIP net.IP) error {
+	if err := n.setPerPortIptables(b, childHostIP, true); err != nil {
 		return err
 	}
-	if err := n.filterPortMappedOnLoopback(b, true); err != nil {
+	if err := n.filterPortMappedOnLoopback(b, childHostIP, true); err != nil {
 		return err
 	}
 	if err := n.filterDirectAccess(b, true); err != nil {
@@ -25,7 +23,20 @@ func (n *network) AddPort(ctx context.Context, pb types.PortBinding, childHostIP
 	return nil
 }
 
-func (n *bridgeNetwork) setPerPortIptables(b portBinding, enable bool) error {
+func (n *network) DelPort(ctx context.Context, b types.PortBinding, childHostIP net.IP) error {
+	if err := n.setPerPortIptables(b, childHostIP, true); err != nil {
+		return err
+	}
+	if err := n.filterPortMappedOnLoopback(b, childHostIP, true); err != nil {
+		return err
+	}
+	if err := n.filterDirectAccess(b, true); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (n *network) setPerPortIptables(b types.PortBinding, childHostIP net.IP, enable bool) error {
 	if (b.IP.To4() != nil) != (b.HostIP.To4() != nil) {
 		// The binding is between containerV4 and hostV6 (not vice-versa as that
 		// will have been rejected earlier). It's handled by docker-proxy, so no
@@ -33,30 +44,32 @@ func (n *bridgeNetwork) setPerPortIptables(b portBinding, enable bool) error {
 		return nil
 	}
 	v := iptables.IPv4
+	enabled := n.ipt.config.IPv4
+	config := n.Config4
 	if b.IP.To4() == nil {
 		v = iptables.IPv6
+		enabled = n.ipt.config.IPv6
+		config = n.Config6
 	}
 
-	if enabled, err := n.iptablesEnabled(v); err != nil || !enabled {
+	if !enabled {
 		// Nothing to do, iptables/ip6tables is not enabled.
 		return nil
 	}
 
-	bridgeName := n.getNetworkBridgeName()
-	proxyPath := n.userlandProxyPath()
-	if err := setPerPortNAT(b, v, proxyPath, bridgeName, enable); err != nil {
+	if err := n.setPerPortNAT(v, b, childHostIP, enable); err != nil {
 		return err
 	}
 
-	if !n.gwMode(v).unprotected() {
-		if err := setPerPortForwarding(b, v, bridgeName, enable); err != nil {
+	if !config.Unprotected {
+		if err := setPerPortForwarding(b, v, n.IfName, enable); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func setPerPortNAT(b portBinding, ipv iptables.IPVersion, proxyPath string, bridgeName string, enable bool) error {
+func (n *network) setPerPortNAT(ipv iptables.IPVersion, b types.PortBinding, childHostIP net.IP, enable bool) error {
 	if b.HostPort == 0 {
 		// NAT is disabled.
 		return nil
@@ -65,8 +78,8 @@ func setPerPortNAT(b portBinding, ipv iptables.IPVersion, proxyPath string, brid
 	// want "0.0.0.0/0". "0/0" is correctly interpreted as "any
 	// value" by both iptables and ip6tables.
 	hostIP := "0/0"
-	if !b.childHostIP.IsUnspecified() {
-		hostIP = b.childHostIP.String()
+	if !childHostIP.IsUnspecified() {
+		hostIP = childHostIP.String()
 	}
 	args := []string{
 		"-p", b.Proto.String(),
@@ -75,9 +88,8 @@ func setPerPortNAT(b portBinding, ipv iptables.IPVersion, proxyPath string, brid
 		"-j", "DNAT",
 		"--to-destination", net.JoinHostPort(b.IP.String(), strconv.Itoa(int(b.Port))),
 	}
-	hairpinMode := proxyPath == ""
-	if !hairpinMode {
-		args = append(args, "!", "-i", bridgeName)
+	if !n.ipt.config.Hairpin {
+		args = append(args, "!", "-i", n.IfName)
 	}
 	if ipv == iptables.IPv6 {
 		args = append(args, "!", "-s", "fe80::/10")
@@ -94,14 +106,14 @@ func setPerPortNAT(b portBinding, ipv iptables.IPVersion, proxyPath string, brid
 		"--dport", strconv.Itoa(int(b.Port)),
 		"-j", "MASQUERADE",
 	}}
-	if err := appendOrDelChainRule(rule, "MASQUERADE", hairpinMode && enable); err != nil {
+	if err := appendOrDelChainRule(rule, "MASQUERADE", n.ipt.config.Hairpin && enable); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func setPerPortForwarding(b portBinding, ipv iptables.IPVersion, bridgeName string, enable bool) error {
+func setPerPortForwarding(b types.PortBinding, ipv iptables.IPVersion, bridgeName string, enable bool) error {
 	// Insert rules for open ports at the top of the filter table's DOCKER
 	// chain (a per-network DROP rule, which must come after these per-port
 	// per-container ACCEPT rules, is appended to the chain when the network
@@ -146,9 +158,9 @@ func setPerPortForwarding(b portBinding, ipv iptables.IPVersion, bridgeName stri
 // This is a no-ip if the portBinding is for IPv6 (IPv6 loopback address is
 // non-routable), or over a network with gw_mode=routed (PBs in routed mode
 // don't map ports on the host).
-func (n *bridgeNetwork) filterPortMappedOnLoopback(b portBinding, enable bool) error {
-	hostIP := b.childHostIP
-	if b.HostPort == 0 || !hostIP.IsLoopback() || b.childHostIP.To4() == nil {
+func (n *network) filterPortMappedOnLoopback(b types.PortBinding, childHostIP net.IP, enable bool) error {
+	hostIP := childHostIP
+	if b.HostPort == 0 || !hostIP.IsLoopback() || childHostIP.To4() == nil {
 		return nil
 	}
 
@@ -183,24 +195,25 @@ func (n *bridgeNetwork) filterPortMappedOnLoopback(b portBinding, enable bool) e
 // mode is "nat".
 //
 // This is a no-op if the gw_mode is "nat-unprotected" or "routed".
-func (n *bridgeNetwork) filterDirectAccess(b portBinding, enable bool) error {
+func (n *network) filterDirectAccess(b types.PortBinding, enable bool) error {
 	ipv := iptables.IPv4
+	config := n.Config4
 	if b.IP.To4() == nil {
+		config = n.Config6
 		ipv = iptables.IPv6
 	}
 
 	// gw_mode=nat-unprotected means there's minimal security for NATed ports,
 	// so don't filter direct access.
-	if n.gwMode(ipv).unprotected() || n.gwMode(ipv).routed() {
+	if config.Unprotected || config.Routed {
 		return nil
 	}
 
-	bridgeName := n.getNetworkBridgeName()
 	drop := iptables.Rule{IPVer: ipv, Table: iptables.Raw, Chain: "PREROUTING", Args: []string{
 		"-p", b.Proto.String(),
 		"-d", b.IP.String(), // Container IP address
 		"--dport", strconv.Itoa(int(b.Port)), // Container port
-		"!", "-i", bridgeName,
+		"!", "-i", n.IfName,
 		"-j", "DROP",
 	}}
 	if err := appendOrDelChainRule(drop, "DIRECT ACCESS FILTERING - DROP", enable); err != nil {

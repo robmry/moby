@@ -110,17 +110,6 @@ func (ipt *IPTables) Init(ctx context.Context, config pktfilter.Config) error {
 	return nil
 }
 
-func (ipt *IPTables) Enabled(version pktfilter.IPVersion) (bool, error) {
-	switch version {
-	case pktfilter.IPv4:
-		return ipt.config.IPv4, nil
-	case pktfilter.IPv6:
-		return ipt.config.IPv6, nil
-	default:
-		return false, errors.New("unsupported IP version")
-	}
-}
-
 func removeIPChains(ctx context.Context, version iptables.IPVersion) {
 	ipt := iptables.GetIptable(version)
 
@@ -237,7 +226,7 @@ func setupIPChains(ctx context.Context, version iptables.IPVersion, hairpin bool
 		return err
 	}
 
-	if err := mirroredWSL2Workaround(ctx, hairpin, version); err != nil {
+	if err := mirroredWSL2Workaround(hairpin, version); err != nil {
 		return err
 	}
 
@@ -313,12 +302,12 @@ func addNATJumpRules(ipVer iptables.IPVersion, hairpinMode, enable bool) error {
 // arriving from any other bridge network. Similarly, this function adds (or
 // removes) a rule to RETURN early for packets delivered via loopback0 with
 // destination 127.0.0.0/8.
-func mirroredWSL2Workaround(ctx context.Context, hairpin bool, ipv iptables.IPVersion) error {
+func mirroredWSL2Workaround(hairpin bool, ipv iptables.IPVersion) error {
 	// WSL2 does not (currently) support Windows<->Linux communication via ::1.
 	if ipv != iptables.IPv4 {
 		return nil
 	}
-	return programChainRule(mirroredWSL2Rule(), "WSL2 loopback", insertMirroredWSL2Rule(ctx, hairpin))
+	return programChainRule(mirroredWSL2Rule(), "WSL2 loopback", insertMirroredWSL2Rule(hairpin))
 }
 
 // insertMirroredWSL2Rule returns true if the NAT rule for mirrored WSL2 workaround
@@ -329,11 +318,11 @@ func mirroredWSL2Workaround(ctx context.Context, hairpin bool, ipv iptables.IPVe
 //     running - no workaround is needed, the normal DNAT/masquerading works.
 //   - and, the host Linux appears to be running under Windows WSL2 with mirrored
 //     mode networking.
-func insertMirroredWSL2Rule(ctx context.Context, hairpin bool) bool {
+func insertMirroredWSL2Rule(hairpin bool) bool {
 	if hairpin {
 		return false
 	}
-	return isRunningUnderWSL2MirroredMode(ctx)
+	return isRunningUnderWSL2MirroredMode()
 }
 
 // isRunningUnderWSL2MirroredMode returns true if the host Linux appears to be
@@ -343,10 +332,10 @@ func insertMirroredWSL2Rule(ctx context.Context, hairpin bool) bool {
 // "mirrored", but applying the workaround for WSL2's loopback device when it's
 // not needed is low risk, compared with executing wslinfo with dockerd's
 // elevated permissions.)
-func isRunningUnderWSL2MirroredMode(ctx context.Context) bool {
+func isRunningUnderWSL2MirroredMode() bool {
 	if _, err := nlwrap.LinkByName("loopback0"); err != nil {
 		if !errors.As(err, &netlink.LinkNotFoundError{}) {
-			log.G(ctx).WithError(err).Warn("Failed to check for WSL interface")
+			log.G(context.TODO()).WithError(err).Warn("Failed to check for WSL interface")
 		}
 		return false
 	}

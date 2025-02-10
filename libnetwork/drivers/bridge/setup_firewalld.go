@@ -19,7 +19,7 @@ func (n *bridgeNetwork) setupFirewalld(config *networkConfiguration, i *bridgeIn
 		return errors.New("no need to register firewalld hooks, iptables is disabled")
 	}
 
-	iptables.OnReloaded(func() { n.setupIP4Tables(config, i) })
+	iptables.OnReloaded(func() { d.pktFilter.AddNetwork()n.setupIP4Tables(config, i) })
 	iptables.OnReloaded(n.reapplyPerPortIptables4)
 	return nil
 }

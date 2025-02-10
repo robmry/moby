@@ -11,12 +11,10 @@ import (
 	"net/netip"
 	"os"
 	"slices"
-	"strconv"
 	"syscall"
 	"unsafe"
 
 	"github.com/containerd/log"
-	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/netutils"
 	"github.com/docker/docker/libnetwork/portallocator"
 	"github.com/docker/docker/libnetwork/portmapper"
@@ -193,15 +191,7 @@ func (n *bridgeNetwork) addPortMappings(
 			}
 		}
 
-		var childHostIP netip.Addr
-		if !b.childHostIP.IsUnspecified() {
-			var ok bool
-			childHostIP, ok = netip.AddrFromSlice(b.childHostIP)
-			if !ok {
-				return nil, fmt.Errorf("bad child host IP %q", b.childHostIP)
-			}
-		}
-		if err := n.pktFilter.AddPort(ctx, b.PortBinding, childHostIP); err != nil {
+		if err := n.pktFilter.AddPort(ctx, b.PortBinding, b.childHostIP); err != nil {
 			return nil, err
 		}
 	}
@@ -750,13 +740,7 @@ func (n *bridgeNetwork) releasePortBindings(pbs []portBinding) error {
 				errs = append(errs, fmt.Errorf("failed to stop userland proxy for port mapping %s: %w", pb, err))
 			}
 		}
-		if err := n.setPerPortIptables(pb, false); err != nil {
-			errs = append(errs, fmt.Errorf("failed to remove iptables rules for port mapping %s: %w", pb, err))
-		}
-		if err := n.filterPortMappedOnLoopback(pb, false); err != nil {
-			errs = append(errs, err)
-		}
-		if err := n.filterDirectAccess(pb, false); err != nil {
+		if err := n.pktFilter.DelPort(context.TODO(), pb.PortBinding, pb.childHostIP); err != nil {
 			errs = append(errs, err)
 		}
 		if pb.HostPort > 0 {
@@ -784,7 +768,7 @@ func (n *bridgeNetwork) reapplyPerPortIptables(needsReconfig func(portBinding) b
 
 	for _, b := range allPBs {
 		if needsReconfig(b) {
-			if err := n.setPerPortIptables(b, true); err != nil {
+			if err := n.pktFilter.AddPort(context.Background(), b.PortBinding, b.childHostIP); err != nil {
 				log.G(context.TODO()).Warnf("Failed to reconfigure NAT %s: %s", b, err)
 			}
 		}
