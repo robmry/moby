@@ -192,15 +192,28 @@ func (n *bridgeNetwork) addPortMappings(
 				return nil, err
 			}
 		}
-		if err := n.setPerPortIptables(b, true); err != nil {
+
+		pb := b.PortBinding
+		if !b.childHostIP.IsUnspecified() {
+			pb.HostIP = b.childHostIP
+		}
+		if err := n.pktFilter.AddPort(ctx, pb); err != nil {
 			return nil, err
 		}
-		if err := n.filterPortMappedOnLoopback(b, true); err != nil {
-			return nil, err
-		}
-		if err := n.filterDirectAccess(b, true); err != nil {
-			return nil, err
-		}
+
+		move all of this to AddPort ...
+		/*
+			if err := n.setPerPortIptables(b, true); err != nil {
+				return nil, err
+			}
+			if err := n.filterPortMappedOnLoopback(b, true); err != nil {
+				return nil, err
+			}
+			if err := n.filterDirectAccess(b, true); err != nil {
+				return nil, err
+			}
+
+		*/
 	}
 
 	// Now the iptables rules are set up, it's safe to start the userland proxy.

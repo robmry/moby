@@ -443,32 +443,6 @@ func (n *bridgeNetwork) getEndpoint(eid string) (*bridgeEndpoint, error) {
 	return nil, nil
 }
 
-// Install/Removes the iptables rules needed to isolate this network
-// from each of the other networks
-func (n *bridgeNetwork) isolateNetwork(enable bool) error {
-	n.Lock()
-	thisConfig := n.config
-	n.Unlock()
-
-	if thisConfig.Internal {
-		return nil
-	}
-
-	// Install the rules to isolate this network against each of the other networks
-	if n.driver.config.EnableIPTables {
-		if err := setINC(iptables.IPv4, thisConfig.BridgeName, thisConfig.GwModeIPv4, enable); err != nil {
-			return err
-		}
-	}
-	if n.driver.config.EnableIP6Tables {
-		if err := setINC(iptables.IPv6, thisConfig.BridgeName, thisConfig.GwModeIPv6, enable); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (d *driver) configure(option map[string]interface{}) error {
 	var config configuration
 	switch opt := option[netlabel.GenericData].(type) {
@@ -784,21 +758,6 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		}
 	}()
 
-	// Add inter-network communication rules.
-	setupNetworkIsolationRules := func(config *networkConfiguration, i *bridgeInterface) error {
-		if err := network.isolateNetwork(true); err != nil {
-			if errRollback := network.isolateNetwork(false); errRollback != nil {
-				log.G(context.TODO()).WithError(errRollback).Warnf("Failed on removing the inter-network iptables rules on cleanup")
-			}
-			return errdefs.System(err)
-		}
-		// register the cleanup function
-		network.registerIptCleanFunc(func() error {
-			return network.isolateNetwork(false)
-		})
-		return nil
-	}
-
 	// Prepare the bridge setup configuration
 	bridgeSetup := newBridgeSetup(config, bridgeIface)
 
@@ -862,12 +821,6 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		// Setup Loopback Addresses Routing
 		{!d.config.EnableUserlandProxy, setupLoopbackAddressesRouting},
 
-		// Setup IPTables.
-		{config.EnableIPv4 && d.config.EnableIPTables, network.setupIP4Tables},
-
-		// Setup IP6Tables.
-		{config.EnableIPv6 && d.config.EnableIP6Tables, network.setupIP6Tables},
-
 		// We want to track firewalld configuration so that
 		// if it is started/reloaded, the rules can be applied correctly
 		{config.EnableIPv4 && d.config.EnableIPTables, network.setupFirewalld},
@@ -879,9 +832,6 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 
 		// Setup DefaultGatewayIPv6
 		{config.DefaultGatewayIPv6 != nil, setupGatewayIPv6},
-
-		// Add inter-network communication rules.
-		{d.config.EnableIPTables || d.config.EnableIP6Tables, setupNetworkIsolationRules},
 
 		// Configure bridge networking filtering if needed and IP tables are enabled
 		{enableBrNfCallIptables && d.config.EnableIPTables, setupIPv4BridgeNetFiltering},
@@ -1025,12 +975,8 @@ func (d *driver) deleteNetwork(nid string) error {
 		// Don't delete the bridge interface if it was not created by libnetwork.
 	}
 
-	// clean all relevant iptables rules
-	for _, cleanFunc := range n.iptCleanFuncs {
-		if errClean := cleanFunc(); errClean != nil {
-			log.G(context.TODO()).Warnf("Failed to clean iptables rules for bridge network: %v", errClean)
-		}
-	}
+	n.pktFilter.Delete(context.TODO())
+
 	return d.storeDelete(config)
 }
 
@@ -1580,6 +1526,39 @@ func LegacyContainerLinkOptions(parentEndpoints, childEndpoints []string) map[st
 			"ChildEndpoints":  childEndpoints,
 		},
 	}
+}
+
+// clearConntrackEntries flushes conntrack entries matching endpoint IP address
+// or matching one of the exposed UDP port.
+// In the first case, this could happen if packets were received by the host
+// between userland proxy startup and iptables setup.
+// In the latter case, this could happen if packets were received whereas there
+// were nowhere to route them, as netfilter creates entries in such case.
+// This is required because iptables NAT rules are evaluated by netfilter only
+// when creating a new conntrack entry. When Docker latter adds NAT rules,
+// netfilter ignore them for any packet matching a pre-existing conntrack entry.
+// As such, we need to flush all those conntrack entries to make sure NAT rules
+// are correctly applied to all packets.
+// See: #8795, #44688 & #44742.
+func clearConntrackEntries(nlh nlwrap.Handle, ep *bridgeEndpoint) {
+	var ipv4List []net.IP
+	var ipv6List []net.IP
+	var udpPorts []uint16
+
+	if ep.addr != nil {
+		ipv4List = append(ipv4List, ep.addr.IP)
+	}
+	if ep.addrv6 != nil {
+		ipv6List = append(ipv6List, ep.addrv6.IP)
+	}
+	for _, pb := range ep.portMapping {
+		if pb.Proto == types.UDP {
+			udpPorts = append(udpPorts, pb.HostPort)
+		}
+	}
+
+	lniptables.DeleteConntrackEntries(nlh, ipv4List, ipv6List)
+	lniptables.DeleteConntrackEntriesByPort(nlh, types.UDP, udpPorts)
 }
 
 func (d *driver) link(network *bridgeNetwork, endpoint *bridgeEndpoint, enable bool) (retErr error) {

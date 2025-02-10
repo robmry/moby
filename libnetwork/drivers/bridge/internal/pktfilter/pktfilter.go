@@ -3,6 +3,8 @@ package pktfilter
 import (
 	"context"
 	"net/netip"
+
+	"github.com/docker/docker/libnetwork/types"
 )
 
 type IPVersion int
@@ -41,4 +43,8 @@ type PktFilter interface {
 	AddNetwork(nc NetworkConfig) (Network, error)
 }
 
-type Network interface{}
+type Network interface {
+	AddPort(ctx context.Context, pb types.PortBinding) error
+	DelPort(ctx context.Context, pb types.PortBinding) error
+	Delete(ctx context.Context) error
+}
