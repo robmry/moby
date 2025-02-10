@@ -44,7 +44,7 @@ type PktFilter interface {
 }
 
 type Network interface {
-	AddPort(ctx context.Context, pb types.PortBinding) error
+	AddPort(ctx context.Context, pb types.PortBinding, childHostIP netip.Addr) error
 	DelPort(ctx context.Context, pb types.PortBinding) error
 	Delete(ctx context.Context) error
 }
