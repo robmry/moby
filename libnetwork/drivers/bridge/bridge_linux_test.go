@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/docker/docker/libnetwork/iptables"
+
 	"github.com/docker/docker/internal/nlwrap"
 	"github.com/docker/docker/internal/testutils/netnsutils"
 	"github.com/docker/docker/internal/testutils/storeutils"
@@ -19,7 +21,6 @@ import (
 	"github.com/docker/docker/libnetwork/ipamapi"
 	"github.com/docker/docker/libnetwork/ipams/defaultipam"
 	"github.com/docker/docker/libnetwork/ipamutils"
-	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/netlabel"
 	"github.com/docker/docker/libnetwork/netutils"
 	"github.com/docker/docker/libnetwork/options"
@@ -27,7 +28,6 @@ import (
 	"github.com/docker/docker/libnetwork/types"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
-	"golang.org/x/sys/unix"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
 	"gotest.tools/v3/icmd"
@@ -614,17 +614,17 @@ func TestCreateMultipleNetworks(t *testing.T) {
 // Verify the network isolation rules are installed for each network
 func verifyV4INCEntries(networks map[string]*bridgeNetwork, t *testing.T) {
 	iptable := iptables.GetIptable(iptables.IPv4)
-	out1, err := iptable.Raw("-S", IsolationChain1)
+	out1, err := iptable.Raw("-S", "DOCKER-ISOLATION-STAGE-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2, err := iptable.Raw("-S", IsolationChain2)
+	out2, err := iptable.Raw("-S", "DOCKER-ISOLATION-STAGE-2")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for _, n := range networks {
-		re := regexp.MustCompile(fmt.Sprintf("-i %s ! -o %s -j %s", n.config.BridgeName, n.config.BridgeName, IsolationChain2))
+		re := regexp.MustCompile(fmt.Sprintf("-i %s ! -o %s -j %s", n.config.BridgeName, n.config.BridgeName, "DOCKER-ISOLATION-STAGE-2"))
 		matches := re.FindAllString(string(out1[:]), -1)
 		if len(matches) != 1 {
 			t.Fatalf("Cannot find expected inter-network isolation rules in IP Tables for network %s:\n%s.", n.id, string(out1[:]))
@@ -965,7 +965,7 @@ func TestLinkContainers(t *testing.T) {
 		t.Fatalf("Failed to program external connectivity: %v", err)
 	}
 
-	out, _ := iptable.Raw("-L", DockerChain)
+	out, _ := iptable.Raw("-L", "DOCKER")
 	for _, pm := range exposedPorts {
 		regex := fmt.Sprintf("%s dpt:%d", pm.Proto.String(), pm.Port)
 		re := regexp.MustCompile(regex)
@@ -991,7 +991,7 @@ func TestLinkContainers(t *testing.T) {
 		t.Fatal("Failed to unlink ep1 and ep2")
 	}
 
-	out, _ = iptable.Raw("-L", DockerChain)
+	out, _ = iptable.Raw("-L", "DOCKER")
 	for _, pm := range exposedPorts {
 		regex := fmt.Sprintf("%s dpt:%d", pm.Proto.String(), pm.Port)
 		re := regexp.MustCompile(regex)
@@ -1019,7 +1019,7 @@ func TestLinkContainers(t *testing.T) {
 	}
 	err = d.ProgramExternalConnectivity(context.Background(), "net1", "ep2", sbOptions)
 	if err != nil {
-		out, _ = iptable.Raw("-L", DockerChain)
+		out, _ = iptable.Raw("-L", "DOCKER")
 		for _, pm := range exposedPorts {
 			regex := fmt.Sprintf("%s dpt:%d", pm.Proto.String(), pm.Port)
 			re := regexp.MustCompile(regex)
@@ -1241,64 +1241,6 @@ func TestSetDefaultGw(t *testing.T) {
 
 	if !gw6.Equal(te.gw6) {
 		t.Fatalf("Failed to configure default gateway. Expected %v. Found %v", gw6, te.gw6)
-	}
-}
-
-func TestCleanupIptableRules(t *testing.T) {
-	defer netnsutils.SetupTestOSContext(t)()
-	bridgeChains := []struct {
-		name       string
-		table      iptables.Table
-		expRemoved bool
-	}{
-		{name: DockerChain, table: iptables.Nat, expRemoved: true},
-		// The filter-FORWARD chain has references to DockerChain and IsolationChain1,
-		// so the chains won't be removed - but they should be flushed. (This has
-		// long/always been the case for the daemon, its filter-FORWARD rules aren't
-		// removed.)
-		{name: DockerChain, table: iptables.Filter},
-		{name: IsolationChain1, table: iptables.Filter},
-	}
-
-	ipVersions := []iptables.IPVersion{iptables.IPv4, iptables.IPv6}
-	configs := map[iptables.IPVersion]configuration{
-		iptables.IPv4: {EnableIPTables: true},
-		iptables.IPv6: {EnableIP6Tables: true},
-	}
-
-	assert.NilError(t, setupHashNetIpset(ipsetExtBridges4, unix.AF_INET))
-	assert.NilError(t, setupHashNetIpset(ipsetExtBridges6, unix.AF_INET6))
-
-	for _, version := range ipVersions {
-		err := setupIPChains(configs[version], version)
-		assert.NilError(t, err, "version:%s", version)
-
-		iptable := iptables.GetIptable(version)
-		for _, chainInfo := range bridgeChains {
-			exists := iptable.ExistChain(chainInfo.name, chainInfo.table)
-			assert.Check(t, exists, "version:%s chain:%s table:%v",
-				version, chainInfo.name, chainInfo.table)
-		}
-
-		// Insert RETURN rules so that there's something to flush.
-		for _, chainInfo := range bridgeChains {
-			out, err := iptable.Raw("-t", string(chainInfo.table), "-A", chainInfo.name, "-j", "RETURN")
-			assert.NilError(t, err, "version:%s chain:%s table:%v out:%s",
-				version, chainInfo.name, chainInfo.table, out)
-		}
-
-		removeIPChains(version)
-
-		for _, chainInfo := range bridgeChains {
-			exists := iptable.Exists(chainInfo.table, chainInfo.name, "-A", chainInfo.name, "-j", "RETURN")
-			assert.Check(t, !exists, "version:%s chain:%s table:%v",
-				version, chainInfo.name, chainInfo.table)
-			if chainInfo.expRemoved {
-				exists := iptable.ExistChain(chainInfo.name, chainInfo.table)
-				assert.Check(t, !exists, "version:%s chain:%s table:%v",
-					version, chainInfo.name, chainInfo.table)
-			}
-		}
 	}
 }
 

@@ -398,11 +398,12 @@ func (n *bridgeNetwork) newPktFilter() error {
 		return err
 	}
 	pfn, err := n.driver.pktFilter.NewNetwork(pktfilter.NetworkConfig{
-		IfName:   n.config.BridgeName,
-		Internal: n.config.Internal,
-		ICC:      n.config.EnableICC,
-		Config4:  config4,
-		Config6:  config6,
+		IfName:     n.config.BridgeName,
+		Internal:   n.config.Internal,
+		ICC:        n.config.EnableICC,
+		Masquerade: n.config.EnableIPMasquerade,
+		Config4:    config4,
+		Config6:    config6,
 	})
 	if err != nil {
 		return err
