@@ -750,15 +750,7 @@ func (n *bridgeNetwork) releasePortBindings(pbs []portBinding) error {
 	return errors.Join(errs...)
 }
 
-func (n *bridgeNetwork) reapplyPerPortIptables4() {
-	n.reapplyPerPortIptables(func(b portBinding) bool { return b.IP.To4() != nil })
-}
-
-func (n *bridgeNetwork) reapplyPerPortIptables6() {
-	n.reapplyPerPortIptables(func(b portBinding) bool { return b.IP.To4() == nil })
-}
-
-func (n *bridgeNetwork) reapplyPerPortIptables(needsReconfig func(portBinding) bool) {
+func (n *bridgeNetwork) reapplyPerPortIptables() {
 	n.Lock()
 	var allPBs []portBinding
 	for _, ep := range n.endpoints {
@@ -767,10 +759,8 @@ func (n *bridgeNetwork) reapplyPerPortIptables(needsReconfig func(portBinding) b
 	n.Unlock()
 
 	for _, b := range allPBs {
-		if needsReconfig(b) {
-			if err := n.pktFilter.AddPort(context.Background(), b.PortBinding, b.childHostIP); err != nil {
-				log.G(context.TODO()).Warnf("Failed to reconfigure NAT %s: %s", b, err)
-			}
+		if err := n.pktFilter.AddPort(context.Background(), b.PortBinding, b.childHostIP); err != nil {
+			log.G(context.TODO()).Warnf("Failed to reconfigure NAT %s: %s", b, err)
 		}
 	}
 }

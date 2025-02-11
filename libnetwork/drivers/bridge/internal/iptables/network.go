@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sync"
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
@@ -16,8 +17,9 @@ import (
 
 type network struct {
 	pktfilter.NetworkConfig
-	cleanFuncs iptablesCleanFuncs
+	cleanFuncs iptablesCleanFuncs // mutex required
 	ipt        *IPTables
+	mu         sync.Mutex
 }
 
 type (
@@ -25,52 +27,71 @@ type (
 	iptablesCleanFuncs []iptableCleanFunc
 )
 
-func (ipt *IPTables) AddNetwork(nc pktfilter.NetworkConfig) (_ pktfilter.Network, retErr error) {
+func (ipt *IPTables) AddNetwork(nc pktfilter.NetworkConfig) (pktfilter.Network, error) {
 	n := &network{
 		NetworkConfig: nc,
 		ipt:           ipt,
 	}
 
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if err := n.configure(); err != nil {
+		return nil, err
+	}
+
+	return n, nil
+}
+
+func (n *network) Reload(_ context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.cleanFuncs = nil
+	return n.configure()
+}
+
+func (n *network) configure() (retErr error) {
 	defer func() {
 		if retErr != nil {
 			n.cleanup()
 		}
 	}()
 
-	if ipt.config.IPv4 {
+	if n.ipt.config.IPv4 {
 		if err := n.setupIPTables(iptables.IPv4, n.Config4, ipsetExtBridges4); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	if ipt.config.IPv6 {
+	if n.ipt.config.IPv6 {
 		if err := n.setupIPTables(iptables.IPv6, n.Config6, ipsetExtBridges6); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	if !n.Internal {
-		if ipt.config.IPv4 {
+		if n.ipt.config.IPv4 {
 			n.registerCleanFunc(func() error {
 				return setINC(iptables.IPv4, n.IfName, n.Config4.Routed, false)
 			})
 			if err := setINC(iptables.IPv4, n.IfName, n.Config4.Routed, true); err != nil {
-				return nil, err
+				return err
 			}
 		}
-		if ipt.config.IPv6 {
+		if n.ipt.config.IPv6 {
 			n.registerCleanFunc(func() error {
 				return setINC(iptables.IPv6, n.IfName, n.Config6.Routed, false)
 			})
 			if err := setINC(iptables.IPv6, n.IfName, n.Config6.Routed, true); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
 
-	return n, nil
+	return nil
 }
 
 func (n *network) Delete(_ context.Context) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.cleanup()
 	return nil
 }
@@ -85,6 +106,7 @@ func (n *network) cleanup() {
 			log.G(context.TODO()).Warnf("Failed to clean iptables rules for bridge network: %v", errClean)
 		}
 	}
+	n.cleanFuncs = nil
 }
 
 func (n *network) setupIPTables(ipVersion iptables.IPVersion, config pktfilter.NetworkConfigFam, ipsetName string) error {
