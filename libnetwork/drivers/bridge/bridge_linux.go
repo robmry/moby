@@ -388,7 +388,7 @@ func parseErr(label, value, errString string) error {
 	return types.InvalidParameterErrorf("failed to parse %s value: %v (%s)", label, value, errString)
 }
 
-func (n *bridgeNetwork) addPktFilter() error {
+func (n *bridgeNetwork) newPktFilter() error {
 	h4, ok := netip.AddrFromSlice(n.config.HostIPv4)
 	if !ok {
 		return fmt.Errorf("invalid host IPv4 address %q", n.config.HostIPv4)
@@ -863,10 +863,6 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		// Setup Loopback Addresses Routing
 		{!d.config.EnableUserlandProxy, setupLoopbackAddressesRouting},
 
-		// We want to track firewalld configuration so that
-		// if it is started/reloaded, the rules can be applied correctly
-		{config.EnableIPv4 && d.config.EnableIPTables, network.setupFirewalld},
-
 		// Setup DefaultGatewayIPv4
 		{config.DefaultGatewayIPv4 != nil, setupGatewayIPv4},
 
@@ -883,7 +879,7 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 	}
 
 	bridgeSetup.queueStep(func(_ *networkConfiguration, _ *bridgeInterface) error {
-		return network.addPktFilter()
+		return network.newPktFilter()
 	})
 
 	bridgeSetup.queueStep(setupDeviceUp)
@@ -1564,7 +1560,36 @@ func (d *driver) handleFirewalldReload() {
 	}
 
 	for _, n := range d.networks {
-		n.addPktFilter()
+		// The old packet filter needs to be replaced, its rules have all been dropped (so
+		// there's no need to Delete it).
+		n.pktFilter = nil
+		if err := n.newPktFilter(); err != nil {
+			log.G(context.Background()).WithFields(log.Fields{
+				"nid":   n.id,
+				"error": err,
+			}).Error("Failed to re-create packet filter on firewalld reload")
+		}
+
+		// Re-add legacy links - only added during ProgramExternalConnectivity, but legacy
+		// links are default-bridge-only, and it's not possible to connect a container to
+		// the default bridge and a user-defined network. So, the default bridge is always
+		// the gateway and, if there are legacy links configured they need to be set up.
+		if !n.config.EnableICC {
+			for _, ep := range n.endpoints {
+				if err := d.link(n, ep, true); err != nil {
+					log.G(context.Background()).WithFields(log.Fields{
+						"nid":   n.id,
+						"eid":   ep.id,
+						"error": err,
+					}).Error("Failed to re-create link on firewalld reload")
+				}
+			}
+		}
+
+		// Set up per-port rules. These are also only set up during ProgramExternalConnectivity
+		// but the network's port bindings are only configured when it's configured as the
+		// gateway network. So, this is a no-op for networks that aren't providing endpoints
+		// with the gateway.
 		n.reapplyPerPortIptables()
 	}
 }
