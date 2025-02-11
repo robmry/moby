@@ -27,58 +27,52 @@ type (
 	iptablesCleanFuncs []iptableCleanFunc
 )
 
-func (ipt *IPTables) NewNetwork(nc pktfilter.NetworkConfig) (pktfilter.Network, error) {
+func NewNetwork(ipt *IPTables, nc pktfilter.NetworkConfig) (_ pktfilter.Network, retErr error) {
 	n := &network{
 		NetworkConfig: nc,
 		ipt:           ipt,
 	}
-
-	if err := n.configure(); err != nil {
-		return nil, err
-	}
-
-	return n, nil
-}
-
-func (n *network) configure() (retErr error) {
 	defer func() {
 		if retErr != nil {
 			n.cleanup()
 		}
 	}()
 
-	if n.ipt.config.IPv4 && n.Config4.Prefix.IsValid() {
-		if err := n.setupIPTables(iptables.IPv4, n.Config4, ipsetExtBridges4); err != nil {
-			return err
-		}
-		if !n.Internal {
-			n.registerCleanFunc(func() error {
-				return setINC(iptables.IPv4, n.IfName, n.Config4.Routed, false)
-			})
-			if err := setINC(iptables.IPv4, n.IfName, n.Config4.Routed, true); err != nil {
-				return err
-			}
+	if n.ipt.config.IPv4 {
+		if err := n.configure(n.Config4); err != nil {
+			return nil, err
 		}
 	}
-	if n.ipt.config.IPv6 && n.Config6.Prefix.IsValid() {
-		if err := n.setupIPTables(iptables.IPv6, n.Config6, ipsetExtBridges6); err != nil {
-			return err
-		}
-		if !n.Internal {
-			n.registerCleanFunc(func() error {
-				return setINC(iptables.IPv6, n.IfName, n.Config6.Routed, false)
-			})
-			if err := setINC(iptables.IPv6, n.IfName, n.Config6.Routed, true); err != nil {
-				return err
-			}
+	if n.ipt.config.IPv6 {
+		if err := n.configure(n.Config6); err != nil {
+			return nil, err
 		}
 	}
-
-	return nil
+	return n, nil
 }
 
 func (n *network) Delete(_ context.Context) error {
 	n.cleanup()
+	return nil
+}
+
+func (n *network) configure(conf pktfilter.NetworkConfigFam) error {
+	if !conf.Prefix.IsValid() {
+		return nil
+	}
+	if err := n.setupIPTables(iptables.IPv4, n.Config4, ipsetExtBridges4); err != nil {
+		return err
+	}
+	if !n.Internal {
+		// Register the cleanup function first so that, if setINC fails after creating
+		// some rules, they will be deleted.
+		n.registerCleanFunc(func() error {
+			return setINC(iptables.IPv4, n.IfName, n.Config4.Routed, false)
+		})
+		if err := setINC(iptables.IPv4, n.IfName, n.Config4.Routed, true); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

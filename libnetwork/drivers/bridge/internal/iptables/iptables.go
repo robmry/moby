@@ -110,6 +110,10 @@ func (ipt *IPTables) Init(ctx context.Context, config pktfilter.Config) error {
 	return nil
 }
 
+func (ipt *IPTables) NewNetwork(nc pktfilter.NetworkConfig) (pktfilter.Network, error) {
+	return NewNetwork(ipt, nc)
+}
+
 func removeIPChains(ctx context.Context, version iptables.IPVersion) {
 	ipt := iptables.GetIptable(version)
 
