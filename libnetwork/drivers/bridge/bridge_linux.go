@@ -405,7 +405,7 @@ func (n *bridgeNetwork) addPktFilter() error {
 	if !ok {
 		return fmt.Errorf("invalid IPv6 prefix %s", n.bridge.bridgeIPv6)
 	}
-	pfn, err := n.driver.pktFilter.AddNetwork(pktfilter.NetworkConfig{
+	pfn, err := n.driver.pktFilter.NewNetwork(pktfilter.NetworkConfig{
 		IfName:   n.config.BridgeName,
 		Internal: n.config.Internal,
 		ICC:      n.config.EnableICC,
@@ -507,6 +507,7 @@ func (d *driver) configure(option map[string]interface{}) error {
 		IPv6:    config.EnableIP6Tables,
 		Hairpin: !config.EnableUserlandProxy || config.UserlandProxyPath == "",
 	})
+	lniptables.OnReloaded(d.handleFirewalldReload)
 
 	var pdc portDriverClient
 	if config.Rootless {
@@ -1521,15 +1522,6 @@ func (d *driver) RevokeExternalConnectivity(nid, eid string) error {
 	return nil
 }
 
-func LegacyContainerLinkOptions(parentEndpoints, childEndpoints []string) map[string]interface{} {
-	return options.Generic{
-		netlabel.GenericData: options.Generic{
-			"ParentEndpoints": parentEndpoints,
-			"ChildEndpoints":  childEndpoints,
-		},
-	}
-}
-
 // clearConntrackEntries flushes conntrack entries matching endpoint IP address
 // or matching one of the exposed UDP port.
 // In the first case, this could happen if packets were received by the host
@@ -1561,6 +1553,29 @@ func clearConntrackEntries(nlh nlwrap.Handle, ep *bridgeEndpoint) {
 
 	lniptables.DeleteConntrackEntries(nlh, ipv4List, ipv6List)
 	lniptables.DeleteConntrackEntriesByPort(nlh, types.UDP, udpPorts)
+}
+
+func (d *driver) handleFirewalldReload() {
+	d.Lock()
+	defer d.Unlock()
+
+	if !d.config.EnableIPTables && !d.config.EnableIP6Tables {
+		return
+	}
+
+	for _, n := range d.networks {
+		n.addPktFilter()
+		n.reapplyPerPortIptables()
+	}
+}
+
+func LegacyContainerLinkOptions(parentEndpoints, childEndpoints []string) map[string]interface{} {
+	return options.Generic{
+		netlabel.GenericData: options.Generic{
+			"ParentEndpoints": parentEndpoints,
+			"ChildEndpoints":  childEndpoints,
+		},
+	}
 }
 
 func (d *driver) link(network *bridgeNetwork, endpoint *bridgeEndpoint, enable bool) (retErr error) {

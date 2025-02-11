@@ -6,23 +6,20 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"sync"
-
-	"github.com/docker/docker/libnetwork/types"
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/pktfilter"
 	"github.com/docker/docker/libnetwork/iptables"
+	"github.com/docker/docker/libnetwork/types"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netlink/nl"
 )
 
 type network struct {
 	pktfilter.NetworkConfig
-	cleanFuncs iptablesCleanFuncs // mutex required
+	cleanFuncs iptablesCleanFuncs
 	ipt        *IPTables
-	mu         sync.Mutex
 }
 
 type (
@@ -30,26 +27,17 @@ type (
 	iptablesCleanFuncs []iptableCleanFunc
 )
 
-func (ipt *IPTables) AddNetwork(nc pktfilter.NetworkConfig) (pktfilter.Network, error) {
+func (ipt *IPTables) NewNetwork(nc pktfilter.NetworkConfig) (pktfilter.Network, error) {
 	n := &network{
 		NetworkConfig: nc,
 		ipt:           ipt,
 	}
 
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	if err := n.configure(); err != nil {
 		return nil, err
 	}
 
 	return n, nil
-}
-
-func (n *network) Reload(_ context.Context) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	n.cleanFuncs = nil
-	return n.configure()
 }
 
 func (n *network) configure() (retErr error) {
@@ -93,8 +81,6 @@ func (n *network) configure() (retErr error) {
 }
 
 func (n *network) Delete(_ context.Context) error {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	n.cleanup()
 	return nil
 }

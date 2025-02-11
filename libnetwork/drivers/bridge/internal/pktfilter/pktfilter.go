@@ -39,11 +39,10 @@ type NetworkConfig struct {
 
 type PktFilter interface {
 	Init(ctx context.Context, config Config) error
-	AddNetwork(nc NetworkConfig) (Network, error)
+	NewNetwork(nc NetworkConfig) (Network, error)
 }
 
 type Network interface {
-	Reload(ctx context.Context) error
 	Delete(ctx context.Context) error
 
 	AddPort(ctx context.Context, pb types.PortBinding, childHostIP net.IP) error
