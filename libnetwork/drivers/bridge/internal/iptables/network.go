@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"sync"
+
+	"github.com/docker/docker/libnetwork/types"
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
@@ -485,4 +488,36 @@ func setupInternalNetworkRules(bridgeIface string, prefix netip.Prefix, icc, ins
 
 	// Set Inter Container Communication.
 	return setIcc(version, bridgeIface, icc, true, insert)
+}
+
+func (n *network) AddLink(ctx context.Context, parentIP, childIP net.IP, ports []types.TransportPort) error {
+	if parentIP == nil {
+		return fmt.Errorf("cannot link to a container with an empty parent IP address")
+	}
+	if childIP == nil {
+		return fmt.Errorf("cannot link to a container with an empty child IP address")
+	}
+
+	chain := iptables.ChainInfo{Name: DockerChain}
+	for _, port := range ports {
+		if err := chain.Link(iptables.Append, parentIP, childIP, int(port.Port), port.Proto.String(), n.IfName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (n *network) DelLink(ctx context.Context, parentIP, childIP net.IP, ports []types.TransportPort) {
+	chain := iptables.ChainInfo{Name: DockerChain}
+	for _, port := range ports {
+		if err := chain.Link(iptables.Delete, parentIP, childIP, int(port.Port), port.Proto.String(), n.IfName); err != nil {
+			log.G(ctx).WithFields(log.Fields{
+				"parentIP": parentIP,
+				"childIP":  childIP,
+				"port":     port.Port,
+				"protocol": port.Proto.String(),
+				"bridge":   n.IfName,
+			}).Warn("Failed to remove link between containers")
+		}
+	}
 }

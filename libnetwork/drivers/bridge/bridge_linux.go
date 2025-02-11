@@ -388,6 +388,47 @@ func parseErr(label, value, errString string) error {
 	return types.InvalidParameterErrorf("failed to parse %s value: %v (%s)", label, value, errString)
 }
 
+func (n *bridgeNetwork) addPktFilter() error {
+	h4, ok := netip.AddrFromSlice(n.config.HostIPv4)
+	if !ok {
+		return fmt.Errorf("invalid host IPv4 address %q", n.config.HostIPv4)
+	}
+	p4, ok := netiputil.ToPrefix(n.bridge.bridgeIPv4)
+	if !ok {
+		return fmt.Errorf("invalid IPv4 prefix %s", n.bridge.bridgeIPv4)
+	}
+	h6, ok := netip.AddrFromSlice(n.config.HostIPv6)
+	if !ok {
+		return fmt.Errorf("invalid host IPv4 address %q", n.config.HostIPv4)
+	}
+	p6, ok := netiputil.ToPrefix(n.bridge.bridgeIPv6)
+	if !ok {
+		return fmt.Errorf("invalid IPv6 prefix %s", n.bridge.bridgeIPv6)
+	}
+	pfn, err := n.driver.pktFilter.AddNetwork(pktfilter.NetworkConfig{
+		IfName:   n.config.BridgeName,
+		Internal: n.config.Internal,
+		ICC:      n.config.EnableICC,
+		Config4: pktfilter.NetworkConfigFam{
+			HostIP:      h4,
+			Prefix:      p4.Masked(),
+			Routed:      n.gwMode(pktfilter.IPv4).routed(),
+			Unprotected: n.gwMode(pktfilter.IPv4).unprotected(),
+		},
+		Config6: pktfilter.NetworkConfigFam{
+			HostIP:      h6,
+			Prefix:      p6.Masked(),
+			Routed:      n.gwMode(pktfilter.IPv6).routed(),
+			Unprotected: n.gwMode(pktfilter.IPv6).unprotected(),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	n.pktFilter = pfn
+	return nil
+}
+
 func (n *bridgeNetwork) getNetworkBridgeName() string {
 	n.Lock()
 	config := n.config
@@ -840,45 +881,8 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		}
 	}
 
-	bridgeSetup.queueStep(func(config *networkConfiguration, i *bridgeInterface) error {
-		h4, ok := netip.AddrFromSlice(config.HostIPv4)
-		if !ok {
-			return fmt.Errorf("invalid host IPv4 address %q", config.HostIPv4)
-		}
-		p4, ok := netiputil.ToPrefix(i.bridgeIPv4)
-		if !ok {
-			return fmt.Errorf("invalid IPv4 prefix %s", i.bridgeIPv4)
-		}
-		h6, ok := netip.AddrFromSlice(config.HostIPv6)
-		if !ok {
-			return fmt.Errorf("invalid host IPv4 address %q", config.HostIPv4)
-		}
-		p6, ok := netiputil.ToPrefix(i.bridgeIPv6)
-		if !ok {
-			return fmt.Errorf("invalid IPv6 prefix %s", i.bridgeIPv6)
-		}
-		pfn, err := d.pktFilter.AddNetwork(pktfilter.NetworkConfig{
-			IfName:   config.BridgeName,
-			Internal: config.Internal,
-			ICC:      config.EnableICC,
-			Config4: pktfilter.NetworkConfigFam{
-				HostIP:      h4,
-				Prefix:      p4.Masked(),
-				Routed:      network.gwMode(pktfilter.IPv4).routed(),
-				Unprotected: network.gwMode(pktfilter.IPv4).unprotected(),
-			},
-			Config6: pktfilter.NetworkConfigFam{
-				HostIP:      h6,
-				Prefix:      p6.Masked(),
-				Routed:      network.gwMode(pktfilter.IPv6).routed(),
-				Unprotected: network.gwMode(pktfilter.IPv6).unprotected(),
-			},
-		})
-		if err != nil {
-			return err
-		}
-		network.pktFilter = pfn
-		return nil
+	bridgeSetup.queueStep(func(_ *networkConfiguration, _ *bridgeInterface) error {
+		return network.addPktFilter()
 	})
 
 	bridgeSetup.queueStep(setupDeviceUp)
@@ -1567,17 +1571,15 @@ func (d *driver) link(network *bridgeNetwork, endpoint *bridgeEndpoint, enable b
 		return nil
 	}
 
-	// Try to keep things atomic. addedLinks keeps track of links that were
-	// successfully added. If any error occurred, then roll back all.
-	var addedLinks []*link
-	defer func() {
-		if retErr == nil {
-			return
-		}
-		for _, l := range addedLinks {
-			l.Disable()
-		}
-	}()
+	// Try to keep things atomic when adding - if there's an error, recurse with enable=false
+	// to delete everything that might have been created.
+	if enable {
+		defer func() {
+			if retErr != nil {
+				d.link(network, endpoint, false)
+			}
+		}()
+	}
 
 	if ec.ExposedPorts != nil {
 		for _, p := range cc.ParentEndpoints {
@@ -1589,17 +1591,12 @@ func (d *driver) link(network *bridgeNetwork, endpoint *bridgeEndpoint, enable b
 				return invalidEndpointIDError(p)
 			}
 
-			l, err := newLink(parentEndpoint.addr.IP, endpoint.addr.IP, ec.ExposedPorts, network.config.BridgeName)
-			if err != nil {
-				return err
-			}
 			if enable {
-				if err := l.Enable(); err != nil {
+				if err := network.pktFilter.AddLink(context.TODO(), parentEndpoint.addr.IP, endpoint.addr.IP, ec.ExposedPorts); err != nil {
 					return err
 				}
-				addedLinks = append(addedLinks, l)
 			} else {
-				l.Disable()
+				network.pktFilter.DelLink(context.TODO(), parentEndpoint.addr.IP, endpoint.addr.IP, ec.ExposedPorts)
 			}
 		}
 	}
@@ -1616,17 +1613,15 @@ func (d *driver) link(network *bridgeNetwork, endpoint *bridgeEndpoint, enable b
 			continue
 		}
 
-		l, err := newLink(endpoint.addr.IP, childEndpoint.addr.IP, childEndpoint.extConnConfig.ExposedPorts, network.config.BridgeName)
 		if err != nil {
 			return err
 		}
 		if enable {
-			if err := l.Enable(); err != nil {
+			if err := network.pktFilter.AddLink(context.TODO(), endpoint.addr.IP, childEndpoint.addr.IP, childEndpoint.extConnConfig.ExposedPorts); err != nil {
 				return err
 			}
-			addedLinks = append(addedLinks, l)
 		} else {
-			l.Disable()
+			network.pktFilter.DelLink(context.TODO(), endpoint.addr.IP, childEndpoint.addr.IP, childEndpoint.extConnConfig.ExposedPorts)
 		}
 	}
 
