@@ -246,12 +246,12 @@ func (n *network) setupNonInternalNetworkRules(ipVer iptables.IPVersion, config 
 	// Set NAT.
 	nat := !config.Routed
 	hairpin := n.ipt.config.Hairpin
-	if nat && n.IPMasquerade {
+	if nat && n.Masquerade {
 		if err := programChainRule(natRule, "NAT", enable); err != nil {
 			return err
 		}
 	}
-	if !nat || (n.IPMasquerade && !hairpin) {
+	if !nat || (n.Masquerade && !hairpin) {
 		skipDNAT := iptables.Rule{IPVer: ipVer, Table: iptables.Nat, Chain: DockerChain, Args: []string{
 			"-i", n.IfName,
 			"-j", "RETURN",
