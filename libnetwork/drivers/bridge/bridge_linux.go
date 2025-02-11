@@ -389,44 +389,48 @@ func parseErr(label, value, errString string) error {
 }
 
 func (n *bridgeNetwork) newPktFilter() error {
-	h4, ok := netip.AddrFromSlice(n.config.HostIPv4)
-	if !ok {
-		return fmt.Errorf("invalid host IPv4 address %q", n.config.HostIPv4)
+	config4, err := makeNetworkConfigFam(n.config.HostIPv4, n.bridge.bridgeIPv4, n.gwMode(pktfilter.IPv4))
+	if err != nil {
+		return err
 	}
-	p4, ok := netiputil.ToPrefix(n.bridge.bridgeIPv4)
-	if !ok {
-		return fmt.Errorf("invalid IPv4 prefix %s", n.bridge.bridgeIPv4)
-	}
-	h6, ok := netip.AddrFromSlice(n.config.HostIPv6)
-	if !ok {
-		return fmt.Errorf("invalid host IPv4 address %q", n.config.HostIPv4)
-	}
-	p6, ok := netiputil.ToPrefix(n.bridge.bridgeIPv6)
-	if !ok {
-		return fmt.Errorf("invalid IPv6 prefix %s", n.bridge.bridgeIPv6)
+	config6, err := makeNetworkConfigFam(n.config.HostIPv6, n.bridge.bridgeIPv6, n.gwMode(pktfilter.IPv6))
+	if err != nil {
+		return err
 	}
 	pfn, err := n.driver.pktFilter.NewNetwork(pktfilter.NetworkConfig{
 		IfName:   n.config.BridgeName,
 		Internal: n.config.Internal,
 		ICC:      n.config.EnableICC,
-		Config4: pktfilter.NetworkConfigFam{
-			HostIP:      h4,
-			Prefix:      p4.Masked(),
-			Routed:      n.gwMode(pktfilter.IPv4).routed(),
-			Unprotected: n.gwMode(pktfilter.IPv4).unprotected(),
-		},
-		Config6: pktfilter.NetworkConfigFam{
-			HostIP:      h6,
-			Prefix:      p6.Masked(),
-			Routed:      n.gwMode(pktfilter.IPv6).routed(),
-			Unprotected: n.gwMode(pktfilter.IPv6).unprotected(),
-		},
+		Config4:  config4,
+		Config6:  config6,
 	})
 	if err != nil {
 		return err
 	}
 	n.pktFilter = pfn
 	return nil
+}
+
+func makeNetworkConfigFam(hostIP net.IP, bridgePrefix *net.IPNet, gwm gwMode) (pktfilter.NetworkConfigFam, error) {
+	c := pktfilter.NetworkConfigFam{
+		Routed:      gwm.routed(),
+		Unprotected: gwm.unprotected(),
+	}
+	if hostIP != nil {
+		var ok bool
+		c.HostIP, ok = netip.AddrFromSlice(hostIP)
+		if !ok {
+			return pktfilter.NetworkConfigFam{}, fmt.Errorf("invalid host address for pktFilter %q", hostIP)
+		}
+	}
+	if bridgePrefix != nil {
+		p, ok := netiputil.ToPrefix(bridgePrefix)
+		if !ok {
+			return pktfilter.NetworkConfigFam{}, fmt.Errorf("invalid bridge prefix for pktFilter %s", bridgePrefix)
+		}
+		c.Prefix = p.Masked()
+	}
+	return c, nil
 }
 
 func (n *bridgeNetwork) getNetworkBridgeName() string {

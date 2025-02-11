@@ -47,19 +47,11 @@ func (n *network) configure() (retErr error) {
 		}
 	}()
 
-	if n.ipt.config.IPv4 {
+	if n.ipt.config.IPv4 && n.Config4.Prefix.IsValid() {
 		if err := n.setupIPTables(iptables.IPv4, n.Config4, ipsetExtBridges4); err != nil {
 			return err
 		}
-	}
-	if n.ipt.config.IPv6 {
-		if err := n.setupIPTables(iptables.IPv6, n.Config6, ipsetExtBridges6); err != nil {
-			return err
-		}
-	}
-
-	if !n.Internal {
-		if n.ipt.config.IPv4 {
+		if !n.Internal {
 			n.registerCleanFunc(func() error {
 				return setINC(iptables.IPv4, n.IfName, n.Config4.Routed, false)
 			})
@@ -67,7 +59,12 @@ func (n *network) configure() (retErr error) {
 				return err
 			}
 		}
-		if n.ipt.config.IPv6 {
+	}
+	if n.ipt.config.IPv6 && n.Config6.Prefix.IsValid() {
+		if err := n.setupIPTables(iptables.IPv6, n.Config6, ipsetExtBridges6); err != nil {
+			return err
+		}
+		if !n.Internal {
 			n.registerCleanFunc(func() error {
 				return setINC(iptables.IPv6, n.IfName, n.Config6.Routed, false)
 			})
