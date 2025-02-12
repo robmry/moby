@@ -830,6 +830,7 @@ func TestAddPortMappings(t *testing.T) {
 					GwModeIPv4: tc.gwMode4,
 					GwModeIPv6: tc.gwMode6,
 				},
+				bridge: &bridgeInterface{},
 				driver: newDriver(storeutils.NewTempStore(t)),
 			}
 			genericOption := map[string]interface{}{
@@ -842,6 +843,8 @@ func TestAddPortMappings(t *testing.T) {
 				},
 			}
 			err := n.driver.configure(genericOption)
+			assert.NilError(t, err)
+			err = n.newIptablesNetwork()
 			assert.NilError(t, err)
 
 			assert.Check(t, is.Equal(n.driver.portDriverClient == nil, !tc.rootless))
