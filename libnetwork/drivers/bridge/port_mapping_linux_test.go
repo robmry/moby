@@ -844,8 +844,10 @@ func TestAddPortMappings(t *testing.T) {
 			}
 			err := n.driver.configure(genericOption)
 			assert.NilError(t, err)
-			err = n.newIptablesNetwork()
+			fwn, err := n.newIptablesNetwork()
 			assert.NilError(t, err)
+			assert.Check(t, fwn != nil, "no firewaller network")
+			n.iptablesNetwork = fwn
 
 			assert.Check(t, is.Equal(n.driver.portDriverClient == nil, !tc.rootless))
 			expChildIP := func(hostIP net.IP) net.IP {
