@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
+
 	"github.com/docker/docker/internal/testutils/netnsutils"
 	"github.com/docker/docker/libnetwork/types"
 	"github.com/vishvananda/netlink"
@@ -58,7 +60,7 @@ func TestMirroredWSL2Workaround(t *testing.T) {
 			restoreWslinfoPath := simulateWSL2MirroredMode(t, tc.loopback0, tc.wslinfoPerm)
 			defer restoreWslinfoPath()
 
-			_, err := NewIptabler(FirewallConfig{
+			_, err := NewIptabler(firewaller.Config{
 				IPv4:    true,
 				Hairpin: !tc.userlandProxy,
 			})

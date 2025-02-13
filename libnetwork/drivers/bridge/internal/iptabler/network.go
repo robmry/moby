@@ -10,6 +10,7 @@ import (
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/iptables"
 )
 
@@ -18,30 +19,14 @@ type (
 	iptablesCleanFuncs []iptableCleanFunc
 )
 
-type NetworkConfigFam struct {
-	HostIP      netip.Addr
-	Prefix      netip.Prefix
-	Routed      bool
-	Unprotected bool
-}
-
-type NetworkConfig struct {
-	IfName     string
-	Internal   bool
-	ICC        bool
-	Masquerade bool
-	Config4    NetworkConfigFam
-	Config6    NetworkConfigFam
-}
-
-type Network struct {
-	NetworkConfig
-	fw         *Iptabler
+type network struct {
+	firewaller.NetworkConfig
+	fw         *iptabler
 	cleanFuncs iptablesCleanFuncs
 }
 
-func newNetwork(ipt *Iptabler, nc NetworkConfig) (_ *Network, retErr error) {
-	n := &Network{
+func newNetwork(ipt *iptabler, nc firewaller.NetworkConfig) (_ *network, retErr error) {
+	n := &network{
 		fw:            ipt,
 		NetworkConfig: nc,
 	}
@@ -57,7 +42,7 @@ func newNetwork(ipt *Iptabler, nc NetworkConfig) (_ *Network, retErr error) {
 	return n, nil
 }
 
-func (n *Network) ReapplyNetworkLevelRules() error {
+func (n *network) ReapplyNetworkLevelRules() error {
 	if n.fw.IPv4 {
 		if err := n.configure(iptables.IPv4, n.Config4); err != nil {
 			return err
@@ -71,7 +56,7 @@ func (n *Network) ReapplyNetworkLevelRules() error {
 	return nil
 }
 
-func (n *Network) DelNetworkLevelRules() error {
+func (n *network) DelNetworkLevelRules() error {
 	var errs []error
 	for _, cleanFunc := range n.cleanFuncs {
 		if err := cleanFunc(); err != nil {
@@ -82,7 +67,7 @@ func (n *Network) DelNetworkLevelRules() error {
 	return errors.Join(errs...)
 }
 
-func (n *Network) configure(ipv iptables.IPVersion, conf NetworkConfigFam) error {
+func (n *network) configure(ipv iptables.IPVersion, conf firewaller.NetworkConfigFam) error {
 	if !conf.Prefix.IsValid() {
 		// Delete INC rules, in case they were created by a 28.0.0 daemon that didn't check
 		// whether the network had iptables/ip6tables enabled.
@@ -95,11 +80,11 @@ func (n *Network) configure(ipv iptables.IPVersion, conf NetworkConfigFam) error
 	return nil
 }
 
-func (n *Network) registerCleanFunc(clean iptableCleanFunc) {
+func (n *network) registerCleanFunc(clean iptableCleanFunc) {
 	n.cleanFuncs = append(n.cleanFuncs, clean)
 }
 
-func (n *Network) setupIPTables(ipVersion iptables.IPVersion, config NetworkConfigFam) error {
+func (n *network) setupIPTables(ipVersion iptables.IPVersion, config firewaller.NetworkConfigFam) error {
 	if n.Internal {
 		if err := setupInternalNetworkRules(n.IfName, config.Prefix, n.ICC, true); err != nil {
 			return fmt.Errorf("Failed to Setup IP tables: %w", err)
@@ -301,7 +286,7 @@ func setDefaultForwardRule(ipVersion iptables.IPVersion, ifName string, unprotec
 	return nil
 }
 
-func (n *Network) setupNonInternalNetworkRules(ipVer iptables.IPVersion, config NetworkConfigFam, enable bool) error {
+func (n *network) setupNonInternalNetworkRules(ipVer iptables.IPVersion, config firewaller.NetworkConfigFam, enable bool) error {
 	var natArgs, hpNatArgs []string
 	if config.HostIP.IsValid() {
 		// The user wants IPv4/IPv6 SNAT with the given address.
