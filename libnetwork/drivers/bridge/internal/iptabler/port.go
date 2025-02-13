@@ -13,15 +13,15 @@ import (
 	"github.com/docker/docker/libnetwork/types"
 )
 
-func (n *Network) AddPorts(ctx context.Context, pbs []types.PortBinding) error {
+func (n *network) AddPorts(ctx context.Context, pbs []types.PortBinding) error {
 	return n.modPorts(ctx, pbs, true)
 }
 
-func (n *Network) DelPorts(ctx context.Context, pbs []types.PortBinding) error {
+func (n *network) DelPorts(ctx context.Context, pbs []types.PortBinding) error {
 	return n.modPorts(ctx, pbs, false)
 }
 
-func (n *Network) modPorts(ctx context.Context, pbs []types.PortBinding, enable bool) error {
+func (n *network) modPorts(ctx context.Context, pbs []types.PortBinding, enable bool) error {
 	for _, pb := range pbs {
 		if err := n.setPerPortIptables(ctx, pb, enable); err != nil {
 			return err
@@ -30,7 +30,7 @@ func (n *Network) modPorts(ctx context.Context, pbs []types.PortBinding, enable 
 	return nil
 }
 
-func (n *Network) setPerPortIptables(ctx context.Context, b types.PortBinding, enable bool) error {
+func (n *network) setPerPortIptables(ctx context.Context, b types.PortBinding, enable bool) error {
 	v := iptables.IPv4
 	enabled := n.fw.IPv4
 	config := n.Config4
@@ -72,7 +72,7 @@ func (n *Network) setPerPortIptables(ctx context.Context, b types.PortBinding, e
 	return nil
 }
 
-func (n *Network) setPerPortNAT(ipv iptables.IPVersion, b types.PortBinding, enable bool) error {
+func (n *network) setPerPortNAT(ipv iptables.IPVersion, b types.PortBinding, enable bool) error {
 	if b.HostPort == 0 {
 		// NAT is disabled.
 		return nil
@@ -200,7 +200,7 @@ func filterPortMappedOnLoopback(ctx context.Context, b types.PortBinding, hostIP
 // mode is "nat".
 //
 // This is a no-op if the gw_mode is "nat-unprotected" or "routed".
-func (n *Network) filterDirectAccess(ctx context.Context, b types.PortBinding, enable bool) error {
+func (n *network) filterDirectAccess(ctx context.Context, b types.PortBinding, enable bool) error {
 	if rawRulesDisabled(ctx) {
 		return nil
 	}

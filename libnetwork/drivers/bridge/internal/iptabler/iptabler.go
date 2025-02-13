@@ -11,6 +11,7 @@ import (
 
 	"github.com/containerd/log"
 	"github.com/docker/docker/internal/modprobe"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/iptables"
 )
 
@@ -37,18 +38,12 @@ const (
 	isolationChain2 = "DOCKER-ISOLATION-STAGE-2"
 )
 
-type FirewallConfig struct {
-	IPv4    bool
-	IPv6    bool
-	Hairpin bool
+type iptabler struct {
+	firewaller.Config
 }
 
-type Iptabler struct {
-	FirewallConfig
-}
-
-func NewIptabler(config FirewallConfig) (*Iptabler, error) {
-	ipt := &Iptabler{FirewallConfig: config}
+func NewIptabler(config firewaller.Config) (firewaller.Firewaller, error) {
+	ipt := &iptabler{Config: config}
 
 	if ipt.IPv4 {
 		removeIPChains(iptables.IPv4)
@@ -99,7 +94,7 @@ func NewIptabler(config FirewallConfig) (*Iptabler, error) {
 	return ipt, nil
 }
 
-func (ipt *Iptabler) NewNetwork(nc NetworkConfig) (*Network, error) {
+func (ipt *iptabler) NewNetwork(nc firewaller.NetworkConfig) (firewaller.Network, error) {
 	return newNetwork(ipt, nc)
 }
 
