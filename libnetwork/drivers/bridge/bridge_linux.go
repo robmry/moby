@@ -852,13 +852,13 @@ func (d *driver) createNetwork(config *networkConfiguration) (err error) {
 		{
 			config.EnableIPv4 && d.config.EnableIPForwarding,
 			func(*networkConfiguration, *bridgeInterface) error {
-				return setupIPv4Forwarding(d.config.EnableIPTables && !d.config.DisableFilterForwardDrop)
+				return setupIPv4Forwarding(d.firewaller, d.config.EnableIPTables && !d.config.DisableFilterForwardDrop)
 			},
 		},
 		{
 			config.EnableIPv6 && d.config.EnableIPForwarding,
 			func(*networkConfiguration, *bridgeInterface) error {
-				return setupIPv6Forwarding(d.config.EnableIP6Tables && !d.config.DisableFilterForwardDrop)
+				return setupIPv6Forwarding(d.firewaller, d.config.EnableIP6Tables && !d.config.DisableFilterForwardDrop)
 			},
 		},
 
