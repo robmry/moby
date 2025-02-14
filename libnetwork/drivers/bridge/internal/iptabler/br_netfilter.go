@@ -1,6 +1,6 @@
 //go:build linux
 
-package bridge
+package iptabler
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 // setupIPv4BridgeNetFiltering checks whether IPv4 forwarding is enabled and, if
 // it is, sets kernel param "bridge-nf-call-iptables=1" so that packets traversing
 // the bridge are filtered.
-func setupIPv4BridgeNetFiltering(*networkConfiguration, *bridgeInterface) error {
+func setupIPv4BridgeNetFiltering(_ string) error {
 	if enabled, err := getKernelBoolParam("/proc/sys/net/ipv4/ip_forward"); err != nil {
 		log.G(context.TODO()).Warnf("failed to check IPv4 forwarding: %v", err)
 		return nil
@@ -29,14 +29,11 @@ func setupIPv4BridgeNetFiltering(*networkConfiguration, *bridgeInterface) error 
 // setupIPv6BridgeNetFiltering checks whether IPv6 forwarding is enabled for the
 // bridge and, if it is, sets kernel param "bridge-nf-call-ip6tables=1" so that
 // packets traversing the bridge are filtered.
-func setupIPv6BridgeNetFiltering(config *networkConfiguration, _ *bridgeInterface) error {
-	if !config.EnableIPv6 {
-		return nil
-	}
-	if config.BridgeName == "" {
+func setupIPv6BridgeNetFiltering(ifName string) error {
+	if ifName == "" {
 		return fmt.Errorf("unable to check IPv6 forwarding, no bridge name specified")
 	}
-	if enabled, err := getKernelBoolParam("/proc/sys/net/ipv6/conf/" + config.BridgeName + "/forwarding"); err != nil {
+	if enabled, err := getKernelBoolParam("/proc/sys/net/ipv6/conf/" + ifName + "/forwarding"); err != nil {
 		log.G(context.TODO()).Warnf("failed to check IPv6 forwarding: %v", err)
 		return nil
 	} else if enabled {

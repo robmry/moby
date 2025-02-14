@@ -25,6 +25,22 @@ type network struct {
 	cleanFuncs iptablesCleanFuncs
 }
 
+type ipvConfig struct {
+	ipv              iptables.IPVersion
+	setupBrNetfilter func(ifName string) error
+}
+
+var (
+	ipv4Config = ipvConfig{
+		ipv:              iptables.IPv4,
+		setupBrNetfilter: setupIPv4BridgeNetFiltering,
+	}
+	ipv6Config = ipvConfig{
+		ipv:              iptables.IPv6,
+		setupBrNetfilter: setupIPv6BridgeNetFiltering,
+	}
+)
+
 func newNetwork(ipt *iptabler, nc firewaller.NetworkConfig) (_ *network, retErr error) {
 	n := &network{
 		fw:            ipt,
@@ -44,12 +60,12 @@ func newNetwork(ipt *iptabler, nc firewaller.NetworkConfig) (_ *network, retErr 
 
 func (n *network) ReapplyNetworkLevelRules() error {
 	if n.fw.IPv4 {
-		if err := n.configure(iptables.IPv4, n.Config4); err != nil {
+		if err := n.configure(ipv4Config, n.Config4); err != nil {
 			return err
 		}
 	}
 	if n.fw.IPv6 {
-		if err := n.configure(iptables.IPv6, n.Config6); err != nil {
+		if err := n.configure(ipv6Config, n.Config6); err != nil {
 			return err
 		}
 	}
@@ -67,14 +83,19 @@ func (n *network) DelNetworkLevelRules() error {
 	return errors.Join(errs...)
 }
 
-func (n *network) configure(ipv iptables.IPVersion, conf firewaller.NetworkConfigFam) error {
+func (n *network) configure(ipvc ipvConfig, conf firewaller.NetworkConfigFam) error {
 	if !conf.Prefix.IsValid() {
 		// Delete INC rules, in case they were created by a 28.0.0 daemon that didn't check
 		// whether the network had iptables/ip6tables enabled.
 		// This preserves https://github.com/moby/moby/commit/8cc4d1d4a2b6408232041f9ba4dff966eba80cc0
-		return setINC(ipv, n.IfName, conf.Routed, false)
+		return setINC(ipvc.ipv, n.IfName, conf.Routed, false)
 	}
-	if err := n.setupIPTables(ipv, conf); err != nil {
+	if n.ICC || n.fw.Hairpin {
+		if err := ipvc.setupBrNetfilter(n.IfName); err != nil {
+			return err
+		}
+	}
+	if err := n.setupIPTables(ipvc, conf); err != nil {
 		return err
 	}
 	return nil
@@ -84,7 +105,7 @@ func (n *network) registerCleanFunc(clean iptableCleanFunc) {
 	n.cleanFuncs = append(n.cleanFuncs, clean)
 }
 
-func (n *network) setupIPTables(ipVersion iptables.IPVersion, config firewaller.NetworkConfigFam) error {
+func (n *network) setupIPTables(ipvc ipvConfig, config firewaller.NetworkConfigFam) error {
 	if n.Internal {
 		if err := setupInternalNetworkRules(n.IfName, config.Prefix, n.ICC, true); err != nil {
 			return fmt.Errorf("Failed to Setup IP tables: %w", err)
@@ -93,11 +114,11 @@ func (n *network) setupIPTables(ipVersion iptables.IPVersion, config firewaller.
 			return setupInternalNetworkRules(n.IfName, config.Prefix, n.ICC, false)
 		})
 	} else {
-		if err := n.setupNonInternalNetworkRules(ipVersion, config, true); err != nil {
+		if err := n.setupNonInternalNetworkRules(ipvc.ipv, config, true); err != nil {
 			return fmt.Errorf("Failed to Setup IP tables: %w", err)
 		}
 		n.registerCleanFunc(func() error {
-			return n.setupNonInternalNetworkRules(ipVersion, config, false)
+			return n.setupNonInternalNetworkRules(ipvc.ipv, config, false)
 		})
 
 		if err := iptables.AddInterfaceFirewalld(n.IfName); err != nil {
@@ -110,19 +131,19 @@ func (n *network) setupIPTables(ipVersion iptables.IPVersion, config firewaller.
 			return nil
 		})
 
-		if err := deleteLegacyFilterRules(ipVersion, n.IfName); err != nil {
+		if err := deleteLegacyFilterRules(ipvc.ipv, n.IfName); err != nil {
 			return fmt.Errorf("failed to delete legacy rules in filter-FORWARD: %w", err)
 		}
 
-		err := setDefaultForwardRule(ipVersion, n.IfName, config.Unprotected, true)
+		err := setDefaultForwardRule(ipvc.ipv, n.IfName, config.Unprotected, true)
 		if err != nil {
 			return err
 		}
 		n.registerCleanFunc(func() error {
-			return setDefaultForwardRule(ipVersion, n.IfName, config.Unprotected, false)
+			return setDefaultForwardRule(ipvc.ipv, n.IfName, config.Unprotected, false)
 		})
 
-		ctRule := iptables.Rule{IPVer: ipVersion, Table: iptables.Filter, Chain: dockerCTChain, Args: []string{
+		ctRule := iptables.Rule{IPVer: ipvc.ipv, Table: iptables.Filter, Chain: dockerCTChain, Args: []string{
 			"-o", n.IfName,
 			"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED",
 			"-j", "ACCEPT",
@@ -133,7 +154,7 @@ func (n *network) setupIPTables(ipVersion iptables.IPVersion, config firewaller.
 		n.registerCleanFunc(func() error {
 			return appendOrDelChainRule(ctRule, "bridge ct related", false)
 		})
-		jumpToDockerRule := iptables.Rule{IPVer: ipVersion, Table: iptables.Filter, Chain: dockerBridgeChain, Args: []string{
+		jumpToDockerRule := iptables.Rule{IPVer: ipvc.ipv, Table: iptables.Filter, Chain: dockerBridgeChain, Args: []string{
 			"-o", n.IfName,
 			"-j", dockerChain,
 		}}
@@ -147,9 +168,9 @@ func (n *network) setupIPTables(ipVersion iptables.IPVersion, config firewaller.
 		// Register the cleanup function first. Then, if setINC fails after creating
 		// some rules, they will be deleted.
 		n.registerCleanFunc(func() error {
-			return setINC(ipVersion, n.IfName, config.Routed, false)
+			return setINC(ipvc.ipv, n.IfName, config.Routed, false)
 		})
-		if err := setINC(ipVersion, n.IfName, config.Routed, true); err != nil {
+		if err := setINC(ipvc.ipv, n.IfName, config.Routed, true); err != nil {
 			return err
 		}
 	}
