@@ -40,8 +40,8 @@ func (n *network) setPerPortIptables(ctx context.Context, b types.PortBinding, e
 		config = n.Config6
 	}
 
-	if !enabled {
-		// Nothing to do, iptables/ip6tables is not enabled.
+	if !enabled || n.Internal {
+		// Nothing to do.
 		return nil
 	}
 
