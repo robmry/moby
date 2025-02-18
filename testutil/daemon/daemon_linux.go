@@ -34,3 +34,12 @@ func (d *Daemon) CgroupNamespace(t testing.TB) string {
 
 	return strings.TrimSpace(link)
 }
+
+// FirewallBackendDriver makes an API request for Info, asserts FirewallBackend
+// is non-nil, and returns FirewallBackend.Driver.
+func (d *Daemon) FirewallBackendDriver(t testing.TB) string {
+	t.Helper()
+	info := d.Info(t)
+	assert.Assert(t, info.FirewallBackend != nil, "no firewall backend reported")
+	return info.FirewallBackend.Driver
+}

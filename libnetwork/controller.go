@@ -98,6 +98,7 @@ type Controller struct {
 	agentStopDone    chan struct{}
 	keys             []*types.EncryptionKey
 	diagnosticServer *diagnostic.Server
+	firewallBackend  string
 	mu               sync.Mutex
 
 	// FIXME(thaJeztah): defOsSbox is always nil on non-Linux: move these fields to Linux-only files.
@@ -125,6 +126,7 @@ func New(cfgOptions ...config.Option) (*Controller, error) {
 		diagnosticServer: diagnostic.New(),
 	}
 
+	c.selectFirewallBackend()
 	c.drvRegistry.Notify = c
 
 	// External plugins don't need config passed through daemon. They can
