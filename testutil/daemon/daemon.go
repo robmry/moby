@@ -234,6 +234,10 @@ func New(t testing.TB, ops ...Option) *Daemon {
 	}
 	ops = append(ops, WithOOMScoreAdjust(-500))
 
+	if val, ok := os.LookupEnv("DOCKER_USE_IPTABLES"); ok {
+		ops = append(ops, WithEnvVars("DOCKER_USE_IPTABLES="+val))
+	}
+
 	d, err := NewDaemon(dest, ops...)
 	assert.NilError(t, err, "could not create daemon at %q", dest)
 	if d.rootlessUser != nil && d.dockerdBinary != defaultDockerdBinary {
@@ -980,13 +984,6 @@ func (d *Daemon) Info(t testing.TB) system.Info {
 	assert.NilError(t, err)
 	assert.NilError(t, c.Close())
 	return info
-}
-
-func (d *Daemon) FirewallBackendDriver(t testing.TB) string {
-	t.Helper()
-	info := d.Info(t)
-	assert.Assert(t, info.FirewallBackend != nil, "no firewall backend reported")
-	return info.FirewallBackend.Driver
 }
 
 // TamperWithContainerConfig modifies the on-disk config of a container.
