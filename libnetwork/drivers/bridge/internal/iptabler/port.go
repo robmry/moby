@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/containerd/log"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/types"
 )
@@ -176,7 +177,7 @@ func filterPortMappedOnLoopback(ctx context.Context, b types.PortBinding, hostIP
 		"-i", "loopback0",
 		"-j", "ACCEPT",
 	}}
-	enableMirrored := enable && isRunningUnderWSL2MirroredMode(ctx)
+	enableMirrored := enable && firewaller.IsRunningUnderWSL2MirroredMode(ctx)
 	if err := appendOrDelChainRule(acceptMirrored, "LOOPBACK FILTERING - ACCEPT MIRRORED", enableMirrored); err != nil {
 		return err
 	}

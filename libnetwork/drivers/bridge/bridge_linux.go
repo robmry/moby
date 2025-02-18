@@ -10,17 +10,18 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
-
 	"github.com/containerd/log"
 	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/internal/nlwrap"
 	"github.com/docker/docker/internal/otelutil"
 	"github.com/docker/docker/libnetwork/datastore"
 	"github.com/docker/docker/libnetwork/driverapi"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/iptabler"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/nftabler"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/rlkclient"
 	"github.com/docker/docker/libnetwork/internal/netiputil"
+	"github.com/docker/docker/libnetwork/internal/nftables"
 	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/netlabel"
 	"github.com/docker/docker/libnetwork/netutils"
@@ -533,6 +534,9 @@ func (d *driver) configure(option map[string]interface{}) error {
 }
 
 var newFirewaller = func(ctx context.Context, config firewaller.Config) (firewaller.Firewaller, error) {
+	if nftables.Enabled() {
+		return nftabler.NewNftabler(ctx, config)
+	}
 	return iptabler.NewIptabler(ctx, config)
 }
 

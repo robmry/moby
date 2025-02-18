@@ -234,6 +234,10 @@ func New(t testing.TB, ops ...Option) *Daemon {
 	}
 	ops = append(ops, WithOOMScoreAdjust(-500))
 
+	if val, ok := os.LookupEnv("DOCKER_USE_IPTABLES"); ok {
+		ops = append(ops, WithEnvVars("DOCKER_USE_IPTABLES="+val))
+	}
+
 	d, err := NewDaemon(dest, ops...)
 	assert.NilError(t, err, "could not create daemon at %q", dest)
 	if d.rootlessUser != nil && d.dockerdBinary != defaultDockerdBinary {

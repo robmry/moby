@@ -99,6 +99,7 @@ type Controller struct {
 	agentStopDone    chan struct{}
 	keys             []*types.EncryptionKey
 	diagnosticServer *diagnostic.Server
+	firewallBackend  string
 	mu               sync.Mutex
 
 	// networks is an in-memory cache of Network. Do not use this map unless
@@ -168,6 +169,7 @@ func New(ctx context.Context, cfgOptions ...config.Option) (_ *Controller, retEr
 		diagnosticServer: diagnostic.New(),
 	}
 
+	c.selectFirewallBackend()
 	c.drvRegistry.Notify = c
 
 	// External plugins don't need config passed through daemon. They can
