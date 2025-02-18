@@ -38,6 +38,7 @@ const (
 
 const (
 	fwdInICCRuleGroup = iota + initialRuleGroup + 1
+	fwdInPortsRuleGroup
 	fwdInFinalRuleGroup
 )
 

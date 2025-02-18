@@ -4,6 +4,7 @@ package nftabler
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/docker/docker/internal/testutils/netnsutils"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/internal/nftables"
+	"github.com/docker/docker/libnetwork/types"
 	"github.com/vishvananda/netlink"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
@@ -107,5 +109,65 @@ func simulateWSL2MirroredMode(t *testing.T, loopback0 bool, wslinfoPerm os.FileM
 
 	return func() {
 		firewaller.WslinfoPath = wslinfoPathOrig
+	}
+}
+
+func TestMirroredWSL2LoopbackFiltering(t *testing.T) {
+	ok := nftables.Enable()
+	assert.Assert(t, ok)
+	defer nftables.Disable()
+
+	for _, tc := range []struct {
+		desc             string
+		loopback0        bool
+		wslinfoPerm      os.FileMode // 0 for no-file
+		expLoopback0Rule bool
+	}{
+		{
+			desc: "No loopback0",
+		},
+		{
+			desc:             "WSL2 mirrored",
+			loopback0:        true,
+			wslinfoPerm:      0o777,
+			expLoopback0Rule: true,
+		},
+		{
+			desc:        "loopback0 but wslinfo not executable",
+			loopback0:   true,
+			wslinfoPerm: 0o666,
+		},
+		{
+			desc:      "loopback0 but no wslinfo",
+			loopback0: true,
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			defer netnsutils.SetupTestOSContext(t)()
+			restoreWslinfoPath := simulateWSL2MirroredMode(t, tc.loopback0, tc.wslinfoPerm)
+			defer restoreWslinfoPath()
+
+			const tableName = "test_mirrored_wsl2_loopback"
+			table, err := nftables.NewTable(nftables.IPv4, tableName)
+			assert.NilError(t, err)
+
+			hostIP := net.ParseIP("127.0.0.1")
+			pb := types.PortBinding{Proto: types.TCP, HostIP: hostIP, HostPort: 8000}
+			err = filterPortMappedOnLoopback(context.Background(), table, pb, true)
+			assert.NilError(t, err)
+
+			err = table.Apply(context.Background())
+			assert.NilError(t, err)
+
+			out, err := exec.Command("nft", "list", "table", string(nftables.IPv4), tableName).CombinedOutput()
+			assert.NilError(t, err)
+
+			if tc.expLoopback0Rule {
+				assert.Check(t, is.Contains(string(out), acceptWSL2LoopbackComment))
+			} else {
+				assert.Check(t, !strings.Contains(string(out), acceptWSL2LoopbackComment),
+					"There should not be a loopback0 rule in %s", tableName)
+			}
+		})
 	}
 }
