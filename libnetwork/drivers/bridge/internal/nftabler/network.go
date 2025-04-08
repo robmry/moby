@@ -94,7 +94,7 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 		if !n.ICC {
 			iccVerdict = "drop"
 		}
-		if err := fwdInChain.AppendRule(initialRuleGroup, "iifname == %s counter %s comment ICC",
+		if err := fwdInChain.AppendRule(fwdInICCRuleGroup, "iifname == %s counter %s comment ICC",
 			n.IfName, iccVerdict); err != nil {
 			return fmt.Errorf("adding ICC rule for %q: %w", n.IfName, err)
 		}
