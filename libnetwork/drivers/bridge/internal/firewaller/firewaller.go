@@ -55,7 +55,7 @@ type NetworkConfigFam struct {
 type Firewaller interface {
 	// NewNetwork returns an object that can be used to add published ports and legacy
 	// links for a bridge network.
-	NewNetwork(nc NetworkConfig) (Network, error)
+	NewNetwork(ctx context.Context, nc NetworkConfig) (Network, error)
 }
 
 // Network can be used to manipulate firewall rules for a bridge network.
@@ -64,11 +64,11 @@ type Network interface {
 	// created by [Firewaller.NewNetwork]. It can be called after, for example, a
 	// firewalld reload has deleted the rules. Rules for port mappings and legacy
 	// links are not re-created.
-	ReapplyNetworkLevelRules() error
+	ReapplyNetworkLevelRules(ctx context.Context) error
 	// DelNetworkLevelRules deletes any configuration set up by [Firewaller.NewNetwork].
 	// It does not delete per-port or per-link rules. The caller is responsible for tracking
 	// those and deleting them when the network is removed.
-	DelNetworkLevelRules() error
+	DelNetworkLevelRules(ctx context.Context) error
 
 	// AddPorts adds the configuration needed for published ports.
 	AddPorts(ctx context.Context, pbs []types.PortBinding) error
