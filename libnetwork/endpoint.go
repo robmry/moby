@@ -898,6 +898,7 @@ func (ep *Endpoint) sbLeave(ctx context.Context, sb *Sandbox, force bool) error 
 	if err := sb.clearNetworkResources(ep); err != nil {
 		log.G(ctx).WithError(err).Warn("Failed to clean up network resources on container disconnect")
 	}
+	ep.iface.createdInContainer = false
 
 	// Update the store about the sandbox detach only after we
 	// have completed sb.clearNetworkResources above to avoid
