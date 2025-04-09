@@ -620,7 +620,7 @@ func TestLegacyLink(t *testing.T) {
 		{
 			name:   "access by name",
 			links:  []string{svrName},
-			host:   svrAddr,
+			host:   svrName,
 			expect: "404 Not Found", // Got a response, but the server has nothing to serve.
 		},
 		{
@@ -636,7 +636,7 @@ func TestLegacyLink(t *testing.T) {
 			ctx := testutil.StartSpan(ctx, t)
 			res := ctr.RunAttach(ctx, t, c,
 				ctr.WithLinks(tc.links...),
-				ctr.WithCmd("wget", "-T3", "-O-", "http://"+tc.host),
+				ctr.WithCmd("wget", "-T3", "http://"+tc.host),
 			)
 			assert.Check(t, is.Contains(res.Stderr.String(), tc.expect))
 		})
