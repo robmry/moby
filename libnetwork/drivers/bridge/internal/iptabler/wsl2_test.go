@@ -18,6 +18,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	"gotest.tools/v3/skip"
 )
 
 func TestMirroredWSL2Workaround(t *testing.T) {
@@ -102,6 +103,8 @@ func simulateWSL2MirroredMode(t *testing.T, loopback0 bool, wslinfoPerm os.FileM
 }
 
 func TestMirroredWSL2LoopbackFiltering(t *testing.T) {
+	skip.If(t, iptables.UsingFirewalld(), "firewalld is running in the host netns, it can't modify rules in the test's netns")
+
 	for _, tc := range []struct {
 		desc             string
 		loopback0        bool
@@ -142,11 +145,6 @@ func TestMirroredWSL2LoopbackFiltering(t *testing.T) {
 
 			out, err := exec.Command("iptables-save", "-t", "raw").CombinedOutput()
 			assert.NilError(t, err)
-
-			// Checking this after trying to create rules, to make sure the init code in iptables/firewalld.go has run.
-			if fw, _ := iptables.UsingFirewalld(); fw {
-				t.Skip("firewalld is running in the host netns, it can't modify rules in the test's netns")
-			}
 
 			if tc.expLoopback0Rule {
 				assert.Check(t, is.Equal(strings.Count(string(out), "-A PREROUTING"), 2))
