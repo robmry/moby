@@ -152,8 +152,11 @@ func TestMirroredWSL2LoopbackFiltering(t *testing.T) {
 			assert.NilError(t, err)
 
 			hostIP := net.ParseIP("127.0.0.1")
-			pb := types.PortBinding{Proto: types.TCP, HostIP: hostIP, HostPort: 8000}
-			err = filterPortMappedOnLoopback(context.Background(), table, pb, true)
+			pbs := []types.PortBinding{
+				{Proto: types.TCP, HostIP: hostIP, HostPort: 8000},
+				{Proto: types.TCP, HostIP: hostIP, HostPort: 8001},
+			}
+			err = filterPortMappedOnLoopback(context.Background(), pbs, pbContext{table: table}, true)
 			assert.NilError(t, err)
 
 			err = table.Apply(context.Background())
