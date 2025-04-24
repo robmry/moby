@@ -117,6 +117,17 @@ func ValidateBaseChainPriorities(prios map[string]string) error {
 	return errors.Join(errs...)
 }
 
+func (nft *nftabler) Reload(ctx context.Context) error {
+	var errs []error
+	if nft.config.IPv4 {
+		errs = append(errs, nft.table4.Reload(ctx))
+	}
+	if nft.config.IPv6 {
+		errs = append(errs, nft.table6.Reload(ctx))
+	}
+	return errors.Join(errs...)
+}
+
 func (nft *nftabler) getTable(ipv firewaller.IPVersion) nftables.TableRef {
 	if ipv == firewaller.IPv4 {
 		return nft.table4

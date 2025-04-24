@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -543,6 +545,7 @@ func (d *driver) configure(option map[string]interface{}) error {
 	d.configNetwork.Lock()
 	defer d.configNetwork.Unlock()
 	iptables.OnReloaded(d.handleFirewalldReload)
+	d.startFirewallReloader()
 
 	return d.initStore()
 }
@@ -570,6 +573,26 @@ var newFirewaller = func(ctx context.Context, config firewaller.Config, nftables
 	// to do, there's no need to pass a cleaner to the iptabler.
 	nftabler.Cleanup(ctx, config)
 	return iptabler.NewIptabler(ctx, config)
+}
+
+func (d *driver) startFirewallReloader() {
+	r, ok := d.firewaller.(firewaller.Reloader)
+	if !ok {
+		return
+	}
+
+	hupC := make(chan os.Signal, 1)
+	signal.Notify(hupC, unix.SIGHUP)
+	go func() {
+		for range hupC {
+			d.configNetwork.Lock()
+			log.G(context.Background()).Info("Received SIGHUP, reloading firewall rules")
+			if err := r.Reload(context.Background()); err != nil {
+				log.G(context.Background()).Errorf("Failed to reload firewall rules: %v", err)
+			}
+			d.configNetwork.Unlock()
+		}
+	}()
 }
 
 func (d *driver) getNetwork(id string) (*bridgeNetwork, error) {
