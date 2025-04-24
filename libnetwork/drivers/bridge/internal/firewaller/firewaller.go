@@ -106,6 +106,13 @@ type Network interface {
 	DelLink(ctx context.Context, parentIP, childIP netip.Addr, ports []types.TransportPort)
 }
 
+// Reloader is an optional interface for a Firewaller.
+type Reloader interface {
+	// Reload the current firewall rules. The caller is responsible for locking,
+	// there must not be any concurrent requests to modify rules.
+	Reload(ctx context.Context) error
+}
+
 // FirewallCleanerSetter is an optional interface for a Firewaller.
 type FirewallCleanerSetter interface {
 	// SetFirewallCleaner replaces the FirewallCleaner (possibly with 'nil').

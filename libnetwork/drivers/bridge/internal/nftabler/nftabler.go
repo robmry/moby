@@ -4,6 +4,7 @@ package nftabler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/containerd/log"
@@ -82,6 +83,17 @@ func NewNftabler(ctx context.Context, config firewaller.Config) (firewaller.Fire
 	}
 
 	return nft, nil
+}
+
+func (nft *nftabler) Reload(ctx context.Context) error {
+	var errs []error
+	if nft.config.IPv4 {
+		errs = append(errs, nft.table4.Reload(ctx))
+	}
+	if nft.config.IPv6 {
+		errs = append(errs, nft.table6.Reload(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 func (nft *nftabler) getTable(ipv firewaller.IPVersion) nftables.TableRef {
