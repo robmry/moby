@@ -5,10 +5,13 @@ package nftabler
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
 
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/internal/nftables"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sys/unix"
 )
 
 // Prefix for OTEL span names.
@@ -79,6 +82,20 @@ func NewNftabler(ctx context.Context, config firewaller.Config) (firewaller.Fire
 			return nil, fmt.Errorf("IPv6 initialisation: %w", err)
 		}
 	}
+
+	// FIXME(robmry) - locking!
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, unix.SIGHUP)
+	go func() {
+		for range c {
+			if nft.IPv4 {
+				nft.table4.Reload(ctx)
+			}
+			if nft.IPv6 {
+				nft.table6.Reload(ctx)
+			}
+		}
+	}()
 
 	return nft, nil
 }
