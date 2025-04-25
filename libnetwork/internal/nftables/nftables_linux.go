@@ -52,7 +52,11 @@ import (
 	"text/template"
 
 	"github.com/containerd/log"
+	"go.opentelemetry.io/otel"
 )
+
+// Prefix for OTEL span names.
+const spanPrefix = "libnetwork.internal.nftables"
 
 var (
 	// nftPath is the path of the "nft" tool, set by [Enable] and left empty if the tool
@@ -141,7 +145,14 @@ func Enabled() bool {
 	return nftPath != ""
 }
 
-// ////////////////////////////
+// Disable undoes Enable. Intended for unit testing.
+func Disable() {
+	nftPath = ""
+	incrementalUpdateTempl = nil
+	enableOnce = sync.Once{}
+}
+
+//////////////////////////////
 // Tables
 
 // table is the internal representation of an nftables table.
@@ -255,9 +266,12 @@ table {{$family}} {{$tableName}} {
 // Apply makes incremental updates to nftables, corresponding to changes to the [TableRef]
 // since Apply was last called.
 func (t TableRef) Apply(ctx context.Context) error {
-	var buf bytes.Buffer
+	if !Enabled() {
+		return errors.New("nftables is not enabled")
+	}
 
 	// Update nftables.
+	var buf bytes.Buffer
 	if err := incrementalUpdateTempl.Execute(&buf, t.t); err != nil {
 		return fmt.Errorf("failed to execute template nft ruleset: %w", err)
 	}
@@ -696,6 +710,9 @@ func parseTemplate() error {
 
 // nftApply runs the "nft" command.
 func nftApply(ctx context.Context, nftCmd []byte) error {
+	ctx, span := otel.Tracer("").Start(ctx, spanPrefix+".nft")
+	defer span.End()
+
 	if !Enabled() {
 		return errors.New("nftables is not enabled")
 	}
