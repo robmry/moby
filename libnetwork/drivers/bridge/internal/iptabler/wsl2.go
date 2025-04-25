@@ -4,19 +4,10 @@ package iptabler
 
 import (
 	"context"
-	"errors"
-	"os"
 
-	"github.com/containerd/log"
-	"github.com/docker/docker/internal/nlwrap"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/iptables"
-	"github.com/vishvananda/netlink"
 )
-
-// Path to the executable installed in Linux under WSL2 that reports on
-// WSL config. https://github.com/microsoft/WSL/releases/tag/2.0.4
-// Can be modified by tests.
-var wslinfoPath = "/usr/bin/wslinfo"
 
 // mirroredWSL2Workaround adds or removes an IPv4 NAT rule, depending on whether
 // docker's host Linux appears to be a guest running under WSL2 in with mirrored
@@ -70,28 +61,7 @@ func shouldInsertMirroredWSL2Rule(ctx context.Context, hairpin bool) bool {
 	if hairpin {
 		return false
 	}
-	return isRunningUnderWSL2MirroredMode(ctx)
-}
-
-// isRunningUnderWSL2MirroredMode returns true if the host Linux appears to be
-// running under Windows WSL2 with mirrored mode networking. If a loopback0
-// device exists, and there's an executable at /usr/bin/wslinfo, infer that
-// this is WSL2 with mirrored networking. ("wslinfo --networking-mode" reports
-// "mirrored", but applying the workaround for WSL2's loopback device when it's
-// not needed is low risk, compared with executing wslinfo with dockerd's
-// elevated permissions.)
-func isRunningUnderWSL2MirroredMode(ctx context.Context) bool {
-	if _, err := nlwrap.LinkByName("loopback0"); err != nil {
-		if !errors.As(err, &netlink.LinkNotFoundError{}) {
-			log.G(ctx).WithError(err).Warn("Failed to check for WSL interface")
-		}
-		return false
-	}
-	stat, err := os.Stat(wslinfoPath)
-	if err != nil {
-		return false
-	}
-	return stat.Mode().IsRegular() && (stat.Mode().Perm()&0o111) != 0
+	return firewaller.IsRunningUnderWSL2MirroredMode(ctx)
 }
 
 func mirroredWSL2Rule() iptables.Rule {

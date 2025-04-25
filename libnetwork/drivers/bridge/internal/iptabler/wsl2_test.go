@@ -87,17 +87,17 @@ func simulateWSL2MirroredMode(t *testing.T, loopback0 bool, wslinfoPerm os.FileM
 		assert.NilError(t, err)
 	}
 
-	wslinfoPathOrig := wslinfoPath
+	wslinfoPathOrig := firewaller.WslinfoPath
 	if wslinfoPerm != 0 {
 		tmpdir := t.TempDir()
 		p := filepath.Join(tmpdir, "wslinfo")
 		err := os.WriteFile(p, []byte("#!/bin/sh\necho dummy file\n"), wslinfoPerm)
 		assert.NilError(t, err)
-		wslinfoPath = p
+		firewaller.WslinfoPath = p
 	}
 
 	return func() {
-		wslinfoPath = wslinfoPathOrig
+		firewaller.WslinfoPath = wslinfoPathOrig
 	}
 }
 
