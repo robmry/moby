@@ -523,6 +523,14 @@ func (c ChainRef) AppendRule(group RuleGroup, rule string, args ...interface{}) 
 	return nil
 }
 
+// AppendRuleUf calls AppendRule and returns an undo function or an error.
+func (c ChainRef) AppendRuleUf(group RuleGroup, rule string, args ...interface{}) (func() error, error) {
+	if err := c.AppendRule(group, rule, args...); err != nil {
+		return nil, err
+	}
+	return func() error { return c.DeleteRule(group, rule, args...) }, nil
+}
+
 // DeleteRule deletes a rule from a [RuleGroup] in a [ChainRef]. It is an error
 // to delete from a group that does not exist, or to delete a rule that does not
 // exist.
@@ -616,6 +624,14 @@ func (v VMapRef) AddElement(key string, verdict string) error {
 		"verdict": verdict,
 	}).Debug("nftables: added vmap element")
 	return nil
+}
+
+// AddElementUf calls AddElement and returns an undo function or an error.
+func (v VMapRef) AddElementUf(key string, verdict string) (func() error, error) {
+	if err := v.AddElement(key, verdict); err != nil {
+		return nil, err
+	}
+	return func() error { return v.DeleteElement(key) }, nil
 }
 
 // DeleteElement deletes an element from a verdict map. It is an error to delete
