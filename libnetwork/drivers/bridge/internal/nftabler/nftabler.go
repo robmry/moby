@@ -41,6 +41,10 @@ const (
 	fwdInFinalRuleGroup
 )
 
+const (
+	rawPreroutingPortsRuleGroup = iota + initialRuleGroup + 1
+)
+
 type nftabler struct {
 	config firewaller.Config
 	table4 nftables.TableRef
