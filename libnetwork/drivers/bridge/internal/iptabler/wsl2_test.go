@@ -11,13 +11,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/docker/docker/internal/testutils/netnsutils"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
+	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/types"
 	"github.com/vishvananda/netlink"
-
-	"github.com/docker/docker/internal/testutils/netnsutils"
-	"github.com/docker/docker/libnetwork/iptables"
 	"gotest.tools/v3/assert"
 	is "gotest.tools/v3/assert/cmp"
+	"gotest.tools/v3/skip"
 )
 
 func TestMirroredWSL2Workaround(t *testing.T) {
@@ -60,7 +61,7 @@ func TestMirroredWSL2Workaround(t *testing.T) {
 			restoreWslinfoPath := simulateWSL2MirroredMode(t, tc.loopback0, tc.wslinfoPerm)
 			defer restoreWslinfoPath()
 
-			_, err := NewIptabler(FirewallConfig{
+			_, err := NewIptabler(context.Background(), firewaller.Config{
 				IPv4:    true,
 				Hairpin: !tc.userlandProxy,
 			})
@@ -87,21 +88,23 @@ func simulateWSL2MirroredMode(t *testing.T, loopback0 bool, wslinfoPerm os.FileM
 		assert.NilError(t, err)
 	}
 
-	wslinfoPathOrig := wslinfoPath
+	wslinfoPathOrig := firewaller.WslinfoPath
 	if wslinfoPerm != 0 {
 		tmpdir := t.TempDir()
 		p := filepath.Join(tmpdir, "wslinfo")
 		err := os.WriteFile(p, []byte("#!/bin/sh\necho dummy file\n"), wslinfoPerm)
 		assert.NilError(t, err)
-		wslinfoPath = p
+		firewaller.WslinfoPath = p
 	}
 
 	return func() {
-		wslinfoPath = wslinfoPathOrig
+		firewaller.WslinfoPath = wslinfoPathOrig
 	}
 }
 
 func TestMirroredWSL2LoopbackFiltering(t *testing.T) {
+	skip.If(t, iptables.UsingFirewalld(), "firewalld is running in the host netns, it can't modify rules in the test's netns")
+
 	for _, tc := range []struct {
 		desc             string
 		loopback0        bool
@@ -142,11 +145,6 @@ func TestMirroredWSL2LoopbackFiltering(t *testing.T) {
 
 			out, err := exec.Command("iptables-save", "-t", "raw").CombinedOutput()
 			assert.NilError(t, err)
-
-			// Checking this after trying to create rules, to make sure the init code in iptables/firewalld.go has run.
-			if fw, _ := iptables.UsingFirewalld(); fw {
-				t.Skip("firewalld is running in the host netns, it can't modify rules in the test's netns")
-			}
 
 			if tc.expLoopback0Rule {
 				assert.Check(t, is.Equal(strings.Count(string(out), "-A PREROUTING"), 2))

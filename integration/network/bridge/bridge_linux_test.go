@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"strings"
 	"testing"
@@ -305,17 +306,30 @@ func TestFilterForwardPolicy(t *testing.T) {
 			)
 			host := l3.Hosts[hostname]
 
-			getFwdPolicy := func(cmd string) string {
+			getFwdPolicy := func(usingNftables bool, fam string) string {
 				t.Helper()
-				out := host.MustRun(t, cmd, "-S", "FORWARD")
-				if strings.HasPrefix(out, "-P FORWARD ACCEPT") {
-					return "ACCEPT"
+				if usingNftables {
+					out := host.MustRun(t, "nft", "list chain "+fam+" docker-bridges filter-FORWARD")
+					if strings.Contains(out, "policy accept") {
+						return "ACCEPT"
+					}
+					if strings.Contains(out, "policy drop") {
+						return "DROP"
+					}
+					t.Fatalf("Failed to determine nftables filter-FORWARD policy: %s", out)
+					return ""
+				} else {
+					cmd := fam + "tables"
+					out := host.MustRun(t, cmd, "-S", "FORWARD")
+					if strings.HasPrefix(out, "-P FORWARD ACCEPT") {
+						return "ACCEPT"
+					}
+					if strings.HasPrefix(out, "-P FORWARD DROP") {
+						return "DROP"
+					}
+					t.Fatalf("Failed to determine %s FORWARD policy: %s", cmd, out)
+					return ""
 				}
-				if strings.HasPrefix(out, "-P FORWARD DROP") {
-					return "DROP"
-				}
-				t.Fatalf("Failed to determine %s FORWARD policy: %s", cmd, out)
-				return ""
 			}
 
 			type sysctls struct{ v4, v6def, v6all string }
@@ -341,21 +355,22 @@ func TestFilterForwardPolicy(t *testing.T) {
 				d.StartWithBusybox(ctx, t, tc.daemonArgs...)
 				t.Cleanup(func() { d.Stop(t) })
 			})
+			usingNftables := d.FirewallBackendDriver(t) == "nftables"
 			c := d.NewClientT(t)
 			t.Cleanup(func() { c.Close() })
 
 			// If necessary, the IPv4 policy should have been updated when the default bridge network was created.
-			assert.Check(t, is.Equal(getFwdPolicy("iptables"), tc.expPolicy))
+			assert.Check(t, is.Equal(getFwdPolicy(usingNftables, "ip"), tc.expPolicy))
 			// IPv6 policy should not have been updated yet.
-			assert.Check(t, is.Equal(getFwdPolicy("ip6tables"), "ACCEPT"))
+			assert.Check(t, is.Equal(getFwdPolicy(usingNftables, "ip6"), "ACCEPT"))
 			assert.Check(t, is.Equal(getSysctls(), sysctls{tc.expForwarding, tc.initForwarding, tc.initForwarding}))
 
 			// If necessary, creating an IPv6 network should update the sysctls and policy.
 			const netName = "testnetffp"
 			network.CreateNoError(ctx, t, c, netName, network.WithIPv6())
 			t.Cleanup(func() { network.RemoveNoError(ctx, t, c, netName) })
-			assert.Check(t, is.Equal(getFwdPolicy("iptables"), tc.expPolicy))
-			assert.Check(t, is.Equal(getFwdPolicy("ip6tables"), tc.expPolicy))
+			assert.Check(t, is.Equal(getFwdPolicy(usingNftables, "ip"), tc.expPolicy))
+			assert.Check(t, is.Equal(getFwdPolicy(usingNftables, "ip6"), tc.expPolicy))
 			assert.Check(t, is.Equal(getSysctls(), sysctls{tc.expForwarding, tc.expForwarding, tc.expForwarding}))
 		})
 	}
@@ -748,4 +763,58 @@ func TestRemoveLegacyLink(t *testing.T) {
 	svrAddr := inspSvr.NetworkSettings.Networks["bridge"].IPAddress
 	res = ctr.ExecT(ctx, t, c, clientId, []string{"wget", "-T3", "http://" + svrAddr})
 	assert.Check(t, is.Contains(res.Stderr(), "download timed out"))
+}
+
+// TestPortMappingRestore check that port mappings are restored when a container
+// is restarted after a daemon restart.
+//
+// Replacement for integration-cli test DockerDaemonSuite/TestDaemonIptablesCreate
+func TestPortMappingRestore(t *testing.T) {
+	skip.If(t, testEnv.IsRootless(), "fails before and after restart")
+
+	ctx := setupTest(t)
+	d := daemon.New(t)
+	d.StartWithBusybox(ctx, t)
+	defer d.Stop(t)
+	c := d.NewClientT(t)
+
+	const svrName = "svr"
+	cid := ctr.Run(ctx, t, c,
+		ctr.WithExposedPorts("80/tcp"),
+		ctr.WithPortMap(nat.PortMap{"80/tcp": {}}),
+		ctr.WithName(svrName),
+		ctr.WithRestartPolicy(containertypes.RestartPolicyUnlessStopped),
+		ctr.WithCmd("httpd", "-f"),
+	)
+	defer func() { ctr.Remove(ctx, t, c, cid, containertypes.RemoveOptions{Force: true}) }()
+
+	check := func() {
+		t.Helper()
+		insp := ctr.Inspect(ctx, t, c, cid)
+		assert.Check(t, is.Equal(insp.State.Running, true))
+		assert.Assert(t, is.Contains(insp.NetworkSettings.Ports, nat.Port("80/tcp")))
+		assert.Assert(t, is.Len(insp.NetworkSettings.Ports["80/tcp"], 2))
+		hostPort := insp.NetworkSettings.Ports["80/tcp"][0].HostPort
+		res := ctr.RunAttach(ctx, t, c,
+			ctr.WithExtraHost("thehost:host-gateway"),
+			ctr.WithCmd("wget", "-T3", "http://"+net.JoinHostPort("thehost", hostPort)),
+		)
+		// 404 means the http request worked, but the http server had nothing to serve.
+		assert.Check(t, is.Contains(res.Stderr.String(), "404 Not Found"))
+	}
+
+	check()
+	d.Restart(t)
+	check()
+}
+
+// TestNoSuchExternalBridge checks that the daemon won't start if it's given a "--bridge"
+// that doesn't exist.
+//
+// Replacement for part of DockerDaemonSuite/TestDaemonBridgeExternal
+func TestNoSuchExternalBridge(t *testing.T) {
+	_ = setupTest(t)
+	d := daemon.New(t)
+	err := d.StartWithError("--bridge", "nosuchbridge")
+	assert.Check(t, err != nil, "Expected daemon startup to fail")
 }
