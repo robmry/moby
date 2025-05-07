@@ -458,6 +458,12 @@ func TestIsolated(t *testing.T) {
 		defer apiClient.ContainerRemove(ctx, res.ContainerID, containertypes.RemoveOptions{Force: true})
 		if ipv == "-6" && networking.FirewalldRunning() {
 			// FIXME(robmry) - this fails due to https://github.com/moby/moby/issues/49680
+			if res.ExitCode != 1 {
+				t.Log("XXXXXXX unexpected pass")
+				t.Log(icmd.RunCommand("nft", "list ruleset").Stdout())
+				t.Log(icmd.RunCommand("ip", "a").Stdout())
+				t.Log(icmd.RunCommand("route", "-6").Stdout())
+			}
 			assert.Check(t, is.Equal(res.ExitCode, 1))
 			t.Skip("XFAIL - IPv6, firewalld, isolated - see https://github.com/moby/moby/issues/49680")
 		}
