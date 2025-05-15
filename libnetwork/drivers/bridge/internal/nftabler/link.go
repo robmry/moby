@@ -19,6 +19,10 @@ func (n *network) AddLink(ctx context.Context, parentIP, childIP netip.Addr, por
 		return fmt.Errorf("cannot link to a container with an empty child IP address")
 	}
 
+	if n.fw.cleaner != nil {
+		n.fw.cleaner.DelLink(ctx, n.config, parentIP, childIP, ports)
+	}
+
 	chain := n.fw.table4.Chain(chainFilterFwdIn(n.config.IfName))
 	for _, port := range ports {
 		for _, rule := range legacyLinkRules(parentIP, childIP, port) {
