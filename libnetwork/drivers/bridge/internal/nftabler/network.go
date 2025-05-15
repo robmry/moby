@@ -32,6 +32,10 @@ func (nft *nftabler) NewNetwork(ctx context.Context, nc firewaller.NetworkConfig
 		}
 	}()
 
+	if nft.cleaner != nil {
+		nft.cleaner.DelNetwork(ctx, nc)
+	}
+
 	if n.fw.config.IPv4 {
 		var err error
 		n.cleanFuncs4, err = n.configure(ctx, nft.table4, n.config.Config4)
