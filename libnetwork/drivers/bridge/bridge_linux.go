@@ -19,8 +19,10 @@ import (
 	"github.com/docker/docker/libnetwork/driverapi"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/iptabler"
+	"github.com/docker/docker/libnetwork/drivers/bridge/internal/nftabler"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/rlkclient"
 	"github.com/docker/docker/libnetwork/internal/netiputil"
+	"github.com/docker/docker/libnetwork/internal/nftables"
 	"github.com/docker/docker/libnetwork/iptables"
 	"github.com/docker/docker/libnetwork/netlabel"
 	"github.com/docker/docker/libnetwork/netutils"
@@ -544,6 +546,22 @@ func (d *driver) configure(option map[string]interface{}) error {
 }
 
 var newFirewaller = func(ctx context.Context, config firewaller.Config) (firewaller.Firewaller, error) {
+	if nftables.Enabled() {
+		fw, err := nftabler.NewNftabler(ctx, config)
+		if err != nil {
+			return nil, err
+		}
+		// Without seeing config (interface names, addresses, and so on), the iptabler's
+		// cleaner can't clean up network or port-specific rules that may have been added
+		// to iptables built-in chains. So, if cleanup is needed, give the cleaner to
+		// the nftabler. Then, it'll use it to delete old rules as networks are restored.
+		fw.(firewaller.FirewallCleanerSetter).SetFirewallCleaner(iptabler.NewCleaner(ctx, config))
+		return fw, nil
+	}
+
+	// The nftabler can clean all of its rules in one go. So, even if there's cleanup
+	// to do, there's no need to pass a cleaner to the iptabler.
+	nftabler.Cleanup(ctx, config)
 	return iptabler.NewIptabler(ctx, config)
 }
 
