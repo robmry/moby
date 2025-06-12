@@ -3,7 +3,6 @@ package nftables
 import (
 	"context"
 	"os"
-	"sync"
 	"testing"
 
 	"github.com/docker/docker/internal/testutils/netnsutils"
@@ -15,7 +14,7 @@ import (
 
 func testSetup(t *testing.T) func() {
 	t.Helper()
-	if !Enable() {
+	if err := Enable(); err != nil {
 		// Make sure it didn't fail because of a bug in the text/template.
 		assert.NilError(t, parseTemplate())
 		// If this is not CI, skip.
@@ -23,21 +22,13 @@ func testSetup(t *testing.T) func() {
 			t.Skip("Cannot enable nftables, no 'nft' command in $PATH ?")
 		}
 		// In CI, nft should always be installed, fail the test.
-		t.Fatal("Failed to enable nftables")
+		t.Fatalf("Failed to enable nftables: %s", err)
 	}
 	cleanupContext := netnsutils.SetupTestOSContext(t)
 	return func() {
 		cleanupContext()
-		disable()
+		Disable()
 	}
-}
-
-// disable undoes Enable
-func disable() {
-	incrementalUpdateTempl = nil
-	nftPath = ""
-	reloadTempl = nil
-	enableOnce = sync.Once{}
 }
 
 func applyAndCheck(t *testing.T, tbl TableRef, goldenFilename string) {
