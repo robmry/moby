@@ -17,12 +17,14 @@ type network struct {
 	cleanFuncs4 []func() error
 	cleanFuncs6 []func() error
 	fw          *nftabler
+	ports       *portRulers
 }
 
 func (nft *nftabler) NewNetwork(ctx context.Context, nc firewaller.NetworkConfig) (_ firewaller.Network, retErr error) {
 	n := &network{
 		fw:     nft,
 		config: nc,
+		ports:  newPortRulers(),
 	}
 	defer func() {
 		if retErr != nil {
