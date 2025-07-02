@@ -66,7 +66,7 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 		return nil, nil
 	}
 
-	var cleanFuncs []func() error
+	var cleanFuncs []func(context.Context) error
 	defer func() {
 		if retErr != nil {
 			cleanup(ctx, cleanFuncs, table)
@@ -75,18 +75,18 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 
 	// Filter chain
 
-	fwdInChain := table.Chain(chainFilterFwdIn(n.config.IfName))
-	cleanFuncs = append(cleanFuncs, func() error { return table.DeleteChain(chainFilterFwdIn(n.config.IfName)) })
-	fwdOutChain := table.Chain(chainFilterFwdOut(n.config.IfName))
-	cleanFuncs = append(cleanFuncs, func() error { return table.DeleteChain(chainFilterFwdOut(n.config.IfName)) })
+	fwdInChain := table.Chain(ctx, chainFilterFwdIn(n.config.IfName))
+	cleanFuncs = append(cleanFuncs, func(ctx context.Context) error { return table.DeleteChain(ctx, chainFilterFwdIn(n.config.IfName)) })
+	fwdOutChain := table.Chain(ctx, chainFilterFwdOut(n.config.IfName))
+	cleanFuncs = append(cleanFuncs, func(ctx context.Context) error { return table.DeleteChain(ctx, chainFilterFwdOut(n.config.IfName)) })
 
-	cf, err := table.InterfaceVMap(filtFwdInVMap).AddElementUf(n.config.IfName, "jump "+chainFilterFwdIn(n.config.IfName))
+	cf, err := table.InterfaceVMap(ctx, filtFwdInVMap).AddElementUf(ctx, n.config.IfName, "jump "+chainFilterFwdIn(n.config.IfName))
 	if err != nil {
 		return nil, fmt.Errorf("adding filter-forward jump for %s to %q: %w", conf.Prefix, chainFilterFwdIn(n.config.IfName), err)
 	}
 	cleanFuncs = append(cleanFuncs, cf)
 
-	cf, err = table.InterfaceVMap(filtFwdOutVMap).AddElementUf(n.config.IfName, "jump "+chainFilterFwdOut(n.config.IfName))
+	cf, err = table.InterfaceVMap(ctx, filtFwdOutVMap).AddElementUf(ctx, n.config.IfName, "jump "+chainFilterFwdOut(n.config.IfName))
 	if err != nil {
 		return nil, fmt.Errorf("adding filter-forward jump for %s to %q: %w", conf.Prefix, chainFilterFwdOut(n.config.IfName), err)
 	}
@@ -94,17 +94,17 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 
 	// NAT chain
 
-	natPostroutingIn := table.Chain(chainNatPostRtIn(n.config.IfName))
-	cleanFuncs = append(cleanFuncs, func() error { return table.DeleteChain(chainNatPostRtIn(n.config.IfName)) })
-	cf, err = table.InterfaceVMap(natPostroutingInVMap).AddElementUf(n.config.IfName, "jump "+chainNatPostRtIn(n.config.IfName))
+	natPostroutingIn := table.Chain(ctx, chainNatPostRtIn(n.config.IfName))
+	cleanFuncs = append(cleanFuncs, func(ctx context.Context) error { return table.DeleteChain(ctx, chainNatPostRtIn(n.config.IfName)) })
+	cf, err = table.InterfaceVMap(ctx, natPostroutingInVMap).AddElementUf(ctx, n.config.IfName, "jump "+chainNatPostRtIn(n.config.IfName))
 	if err != nil {
 		return nil, fmt.Errorf("adding postrouting ingress jump for %s to %q: %w", conf.Prefix, chainNatPostRtIn(n.config.IfName), err)
 	}
 	cleanFuncs = append(cleanFuncs, cf)
 
-	natPostroutingOut := table.Chain(chainNatPostRtOut(n.config.IfName))
-	cleanFuncs = append(cleanFuncs, func() error { return table.DeleteChain(chainNatPostRtOut(n.config.IfName)) })
-	cf, err = table.InterfaceVMap(natPostroutingOutVMap).AddElementUf(n.config.IfName, "jump "+chainNatPostRtOut(n.config.IfName))
+	natPostroutingOut := table.Chain(ctx, chainNatPostRtOut(n.config.IfName))
+	cleanFuncs = append(cleanFuncs, func(ctx context.Context) error { return table.DeleteChain(ctx, chainNatPostRtOut(n.config.IfName)) })
+	cf, err = table.InterfaceVMap(ctx, natPostroutingOutVMap).AddElementUf(ctx, n.config.IfName, "jump "+chainNatPostRtOut(n.config.IfName))
 	if err != nil {
 		return nil, fmt.Errorf("adding postrouting egress jump for %s to %q: %w", conf.Prefix, chainNatPostRtOut(n.config.IfName), err)
 	}
@@ -112,13 +112,13 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 
 	// Conntrack
 
-	cf, err = fwdInChain.AppendRuleUf(initialRuleGroup, "ct state established,related counter accept")
+	cf, err = fwdInChain.AppendRuleUf(ctx, initialRuleGroup, "ct state established,related counter accept")
 	if err != nil {
 		return nil, fmt.Errorf("adding conntrack ingress rule for %q: %w", n.config.IfName, err)
 	}
 	cleanFuncs = append(cleanFuncs, cf)
 
-	cf, err = fwdOutChain.AppendRuleUf(initialRuleGroup, "ct state established,related counter accept")
+	cf, err = fwdOutChain.AppendRuleUf(ctx, initialRuleGroup, "ct state established,related counter accept")
 	if err != nil {
 		return nil, fmt.Errorf("adding conntrack egress rule for %q: %w", n.config.IfName, err)
 	}
@@ -131,14 +131,14 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 
 	if n.config.Internal {
 		// Drop anything that's not from this network.
-		cf, err = fwdInChain.AppendRuleUf(initialRuleGroup,
+		cf, err = fwdInChain.AppendRuleUf(ctx, initialRuleGroup,
 			`iifname != %s counter drop comment "INTERNAL NETWORK INGRESS"`, n.config.IfName)
 		if err != nil {
 			return nil, fmt.Errorf("adding INTERNAL NETWORK ingress rule for %q: %w", n.config.IfName, err)
 		}
 		cleanFuncs = append(cleanFuncs, cf)
 
-		cf, err = fwdOutChain.AppendRuleUf(initialRuleGroup,
+		cf, err = fwdOutChain.AppendRuleUf(ctx, initialRuleGroup,
 			`oifname != %s counter drop comment "INTERNAL NETWORK EGRESS"`, n.config.IfName)
 		if err != nil {
 			return nil, fmt.Errorf("adding INTERNAL NETWORK egress rule for %q: %w", n.config.IfName, err)
@@ -146,14 +146,14 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 		cleanFuncs = append(cleanFuncs, cf)
 
 		// Accept or drop Inter-Container Communication.
-		cf, err = fwdInChain.AppendRuleUf(fwdInICCRuleGroup, "counter %s comment ICC", iccVerdict)
+		cf, err = fwdInChain.AppendRuleUf(ctx, fwdInICCRuleGroup, "counter %s comment ICC", iccVerdict)
 		if err != nil {
 			return nil, fmt.Errorf("adding ICC ingress rule for %q: %w", n.config.IfName, err)
 		}
 		cleanFuncs = append(cleanFuncs, cf)
 	} else {
 		// Inter-Container Communication
-		cf, err = fwdInChain.AppendRuleUf(fwdInICCRuleGroup, "iifname == %s counter %s comment ICC",
+		cf, err = fwdInChain.AppendRuleUf(ctx, fwdInICCRuleGroup, "iifname == %s counter %s comment ICC",
 			n.config.IfName, iccVerdict)
 		if err != nil {
 			return nil, fmt.Errorf("adding ICC rule for %q: %w", n.config.IfName, err)
@@ -161,7 +161,7 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 		cleanFuncs = append(cleanFuncs, cf)
 
 		// Outgoing traffic
-		cf, err = fwdOutChain.AppendRuleUf(initialRuleGroup, "counter accept comment OUTGOING")
+		cf, err = fwdOutChain.AppendRuleUf(ctx, initialRuleGroup, "counter accept comment OUTGOING")
 		if err != nil {
 			return nil, fmt.Errorf("adding OUTGOING rule for %q: %w", n.config.IfName, err)
 		}
@@ -169,13 +169,13 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 
 		// Incoming traffic
 		if conf.Unprotected {
-			cf, err = fwdInChain.AppendRuleUf(fwdInFinalRuleGroup, `counter accept comment "UNPROTECTED"`)
+			cf, err = fwdInChain.AppendRuleUf(ctx, fwdInFinalRuleGroup, `counter accept comment "UNPROTECTED"`)
 			if err != nil {
 				return nil, fmt.Errorf("adding UNPROTECTED for %q: %w", n.config.IfName, err)
 			}
 			cleanFuncs = append(cleanFuncs, cf)
 		} else {
-			cf, err = fwdInChain.AppendRuleUf(fwdInFinalRuleGroup, `counter drop comment "UNPUBLISHED PORT DROP"`)
+			cf, err = fwdInChain.AppendRuleUf(ctx, fwdInFinalRuleGroup, `counter drop comment "UNPUBLISHED PORT DROP"`)
 			if err != nil {
 				return nil, fmt.Errorf("adding UNPUBLISHED PORT DROP for %q: %w", n.config.IfName, err)
 			}
@@ -188,7 +188,7 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 			if table.Family() == nftables.IPv6 {
 				rule = "meta l4proto ipv6-icmp"
 			}
-			cf, err = fwdInChain.AppendRuleUf(initialRuleGroup, rule+" counter accept comment ICMP")
+			cf, err = fwdInChain.AppendRuleUf(ctx, initialRuleGroup, rule+" counter accept comment ICMP")
 			if err != nil {
 				return nil, fmt.Errorf("adding ICMP rule for %q: %w", n.config.IfName, err)
 			}
@@ -203,7 +203,7 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 			natPostroutingComment = "SNAT"
 		}
 		if n.config.Masquerade && !conf.Routed {
-			cf, err = natPostroutingOut.AppendRuleUf(initialRuleGroup, `oifname != %s %s saddr %s counter %s comment "%s"`,
+			cf, err = natPostroutingOut.AppendRuleUf(ctx, initialRuleGroup, `oifname != %s %s saddr %s counter %s comment "%s"`,
 				n.config.IfName, table.Family(), conf.Prefix, natPostroutingVerdict, natPostroutingComment)
 			if err != nil {
 				return nil, fmt.Errorf("adding NAT rule for %q: %w", n.config.IfName, err)
@@ -212,7 +212,7 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 		}
 		if n.fw.config.Hairpin {
 			// Masquerade/SNAT traffic from localhost.
-			cf, err = natPostroutingIn.AppendRuleUf(initialRuleGroup, `fib saddr type local counter %s comment "%s FROM HOST"`,
+			cf, err = natPostroutingIn.AppendRuleUf(ctx, initialRuleGroup, `fib saddr type local counter %s comment "%s FROM HOST"`,
 				natPostroutingVerdict, natPostroutingComment)
 			if err != nil {
 				return nil, fmt.Errorf("adding NAT local rule for %q: %w", n.config.IfName, err)
@@ -247,12 +247,12 @@ func (n *network) DelNetworkLevelRules(ctx context.Context) error {
 	return nil
 }
 
-func cleanup(ctx context.Context, cfs []func() error, table nftables.TableRef) {
+func cleanup(ctx context.Context, cfs []func(context.Context) error, table nftables.TableRef) {
 	if len(cfs) == 0 {
 		return
 	}
 	for _, cf := range cfs {
-		if err := cf(); err != nil {
+		if err := cf(ctx); err != nil {
 			log.G(ctx).WithError(err).Warn("Failed to remove nftables rule")
 		}
 	}
