@@ -97,32 +97,49 @@ func (r *Resolver) setupNftablesNAT(ctx context.Context, laddr, ltcpaddr, resolv
 	if err != nil {
 		return err
 	}
+	tm := table.Modifier()
 
-	dnatChain, err := table.BaseChain(ctx, "dns-dnat", nftables.BaseChainTypeNAT, nftables.BaseChainHookOutput, nftables.BaseChainPriorityDstNAT)
-	if err != nil {
-		return err
-	}
-	if err := dnatChain.AppendRule(ctx, 0, "ip daddr %s udp dport %s counter dnat to %s", resolverIP, dnsPort, laddr); err != nil {
-		return err
-	}
-	if err := dnatChain.AppendRule(ctx, 0, "ip daddr %s tcp dport %s counter dnat to %s", resolverIP, dnsPort, ltcpaddr); err != nil {
-		return err
-	}
+	const dnatChain = "dns-dnat"
+	tm.Create(nftables.BaseChainDesc{
+		Name:      dnatChain,
+		ChainType: nftables.BaseChainTypeNAT,
+		Hook:      nftables.BaseChainHookOutput,
+		Priority:  nftables.BaseChainPriorityDstNAT,
+		Policy:    "accept",
+	})
+	tm.Create(nftables.RuleDesc{
+		Chain:       dnatChain,
+		Rule:        []string{"ip daddr", resolverIP, "udp dport", ipPort, "counter dnat to", laddr},
+		IgnoreExist: false,
+	})
+	tm.Create(nftables.RuleDesc{
+		Chain:       dnatChain,
+		Rule:        []string{"ip daddr", resolverIP, "tcp dport", tcpPort, "counter dnat to", ltcpaddr},
+		IgnoreExist: false,
+	})
 
-	snatChain, err := table.BaseChain(ctx, "dns-snat", nftables.BaseChainTypeNAT, nftables.BaseChainHookPostrouting, nftables.BaseChainPrioritySrcNAT)
-	if err != nil {
-		return err
-	}
-	if err := snatChain.AppendRule(ctx, 0, "ip saddr %s udp sport %s counter snat to :%s", resolverIP, ipPort, dnsPort); err != nil {
-		return err
-	}
-	if err := snatChain.AppendRule(ctx, 0, "ip saddr %s tcp sport %s counter snat to :%s", resolverIP, tcpPort, dnsPort); err != nil {
-		return err
-	}
+	const snatChain = "dns-snat"
+	tm.Create(nftables.BaseChainDesc{
+		Name:      dnatChain,
+		ChainType: nftables.BaseChainTypeNAT,
+		Hook:      nftables.BaseChainHookPostrouting,
+		Priority:  nftables.BaseChainPrioritySrcNAT,
+		Policy:    "accept",
+	})
+	tm.Create(nftables.RuleDesc{
+		Chain:       dnatChain,
+		Rule:        []string{"ip saddr", resolverIP, "udp sport", ipPort, "counter dnat to", dnsPort},
+		IgnoreExist: false,
+	})
+	tm.Create(nftables.RuleDesc{
+		Chain:       dnatChain,
+		Rule:        []string{"ip saddr", resolverIP, "tcp sport", tcpPort, "counter dnat to", dnsPort},
+		IgnoreExist: false,
+	})
 
 	var setupErr error
 	if err := r.backend.ExecFunc(func() {
-		setupErr = table.Apply(ctx)
+		setupErr = tm.Apply(ctx)
 	}); err != nil {
 		return err
 	}

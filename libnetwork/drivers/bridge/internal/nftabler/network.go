@@ -7,16 +7,16 @@ import (
 	"fmt"
 
 	"github.com/containerd/log"
-	"github.com/docker/docker/internal/cleanups"
 	"github.com/docker/docker/libnetwork/drivers/bridge/internal/firewaller"
 	"github.com/docker/docker/libnetwork/internal/nftables"
 	"go.opentelemetry.io/otel"
 )
 
 type network struct {
-	config  firewaller.NetworkConfig
-	cleaner func(ctx context.Context) error
-	fw      *nftabler
+	config   firewaller.NetworkConfig
+	remover4 nftables.TableModifier
+	remover6 nftables.TableModifier
+	fw       *nftabler
 }
 
 func (nft *nftabler) NewNetwork(ctx context.Context, nc firewaller.NetworkConfig) (_ firewaller.Network, retErr error) {
@@ -26,104 +26,84 @@ func (nft *nftabler) NewNetwork(ctx context.Context, nc firewaller.NetworkConfig
 	}
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{"bridge": n.config.IfName}))
 
-	var cleaner cleanups.Composite
-	defer func() {
-		if err := cleaner.Call(ctx); err != nil {
-			log.G(ctx).WithError(err).Warn("Failed to clean up nftables rules for network")
-		}
-	}()
+	if nft.cleaner != nil {
+		nft.cleaner.DelNetwork(ctx, nc)
+	}
 
 	if n.fw.config.IPv4 {
-		clean, err := n.configure(ctx, nft.table4, n.config.Config4)
+		remover, err := n.configure(ctx, nft.table4, n.config.Config4)
 		if err != nil {
 			return nil, err
 		}
-		if clean != nil {
-			cleaner.Add(clean)
-		}
+		n.remover4 = remover
 	}
 	if n.fw.config.IPv6 {
-		clean, err := n.configure(ctx, nft.table6, n.config.Config6)
+		remover, err := n.configure(ctx, nft.table6, n.config.Config6)
 		if err != nil {
 			return nil, err
 		}
-		if clean != nil {
-			cleaner.Add(clean)
-		}
+		n.remover6 = remover
 	}
-
-	n.cleaner = cleaner.Release()
 	return n, nil
 }
 
-func (n *network) configure(ctx context.Context, table nftables.TableRef, conf firewaller.NetworkConfigFam) (func(context.Context) error, error) {
-	ctx, span := otel.Tracer("").Start(ctx, spanPrefix+".newNetwork."+string(table.Family()))
+func (n *network) configure(ctx context.Context, table nftables.Table, conf firewaller.NetworkConfigFam) (nftables.TableModifier, error) {
+	if !conf.Prefix.IsValid() {
+		return nftables.TableModifier{}, nil
+	}
+	tm := table.Modifier()
+	ctx, span := otel.Tracer("").Start(ctx, spanPrefix+".newNetwork."+string(tm.Family()))
 	defer span.End()
 
-	if !conf.Prefix.IsValid() {
-		return nil, nil
-	}
-
-	var cleanup cleanups.Composite
-	defer cleanup.Call(ctx)
-	var applied bool
-	cleanup.Add(func(ctx context.Context) error {
-		if applied {
-			return nftApply(ctx, table)
-		}
-		return nil
-	})
+	fwdInChain := chainFilterFwdIn(n.config.IfName)
+	fwdOutChain := chainFilterFwdOut(n.config.IfName)
+	natPostRtInChain := chainNatPostRtIn(n.config.IfName)
+	natPostRtOutChain := chainNatPostRtOut(n.config.IfName)
 
 	// Filter chain
 
-	fwdInChain := table.Chain(ctx, chainFilterFwdIn(n.config.IfName))
-	cleanup.Add(func(ctx context.Context) error { return table.DeleteChain(ctx, chainFilterFwdIn(n.config.IfName)) })
-	fwdOutChain := table.Chain(ctx, chainFilterFwdOut(n.config.IfName))
-	cleanup.Add(func(ctx context.Context) error { return table.DeleteChain(ctx, chainFilterFwdOut(n.config.IfName)) })
+	tm.Create(nftables.ChainDesc{Name: fwdInChain})
+	tm.Create(nftables.ChainDesc{Name: fwdOutChain})
 
-	cf, err := table.InterfaceVMap(ctx, filtFwdInVMap).AddElementCf(ctx, n.config.IfName, "jump "+chainFilterFwdIn(n.config.IfName))
-	if err != nil {
-		return nil, fmt.Errorf("adding filter-forward jump for %s to %q: %w", conf.Prefix, chainFilterFwdIn(n.config.IfName), err)
-	}
-	cleanup.Add(cf)
-
-	cf, err = table.InterfaceVMap(ctx, filtFwdOutVMap).AddElementCf(ctx, n.config.IfName, "jump "+chainFilterFwdOut(n.config.IfName))
-	if err != nil {
-		return nil, fmt.Errorf("adding filter-forward jump for %s to %q: %w", conf.Prefix, chainFilterFwdOut(n.config.IfName), err)
-	}
-	cleanup.Add(cf)
+	tm.Create(nftables.VMapElementDesc{
+		Name:    filtFwdInVMap,
+		Key:     n.config.IfName,
+		Verdict: "jump " + fwdInChain,
+	})
+	tm.Create(nftables.VMapElementDesc{
+		Name:    filtFwdOutVMap,
+		Key:     n.config.IfName,
+		Verdict: "jump " + fwdOutChain,
+	})
 
 	// NAT chain
 
-	natPostroutingIn := table.Chain(ctx, chainNatPostRtIn(n.config.IfName))
-	cleanup.Add(func(ctx context.Context) error { return table.DeleteChain(ctx, chainNatPostRtIn(n.config.IfName)) })
-	cf, err = table.InterfaceVMap(ctx, natPostroutingInVMap).AddElementCf(ctx, n.config.IfName, "jump "+chainNatPostRtIn(n.config.IfName))
-	if err != nil {
-		return nil, fmt.Errorf("adding postrouting ingress jump for %s to %q: %w", conf.Prefix, chainNatPostRtIn(n.config.IfName), err)
-	}
-	cleanup.Add(cf)
+	tm.Create(nftables.ChainDesc{Name: natPostRtInChain})
+	tm.Create(nftables.VMapElementDesc{
+		Name:    natPostroutingInVMap,
+		Key:     n.config.IfName,
+		Verdict: "jump " + natPostRtInChain,
+	})
 
-	natPostroutingOut := table.Chain(ctx, chainNatPostRtOut(n.config.IfName))
-	cleanup.Add(func(ctx context.Context) error { return table.DeleteChain(ctx, chainNatPostRtOut(n.config.IfName)) })
-	cf, err = table.InterfaceVMap(ctx, natPostroutingOutVMap).AddElementCf(ctx, n.config.IfName, "jump "+chainNatPostRtOut(n.config.IfName))
-	if err != nil {
-		return nil, fmt.Errorf("adding postrouting egress jump for %s to %q: %w", conf.Prefix, chainNatPostRtOut(n.config.IfName), err)
-	}
-	cleanup.Add(cf)
+	tm.Create(nftables.ChainDesc{Name: chainNatPostRtOut(n.config.IfName)})
+	tm.Create(nftables.VMapElementDesc{
+		Name:    natPostroutingOutVMap,
+		Key:     n.config.IfName,
+		Verdict: "jump " + chainNatPostRtOut(n.config.IfName),
+	})
 
 	// Conntrack
 
-	cf, err = fwdInChain.AppendRuleCf(ctx, initialRuleGroup, "ct state established,related counter accept")
-	if err != nil {
-		return nil, fmt.Errorf("adding conntrack ingress rule for %q: %w", n.config.IfName, err)
-	}
-	cleanup.Add(cf)
-
-	cf, err = fwdOutChain.AppendRuleCf(ctx, initialRuleGroup, "ct state established,related counter accept")
-	if err != nil {
-		return nil, fmt.Errorf("adding conntrack egress rule for %q: %w", n.config.IfName, err)
-	}
-	cleanup.Add(cf)
+	tm.Create(nftables.RuleDesc{
+		Chain: chainFilterFwdIn(n.config.IfName),
+		Group: initialRuleGroup,
+		Rule:  []string{"ct state established,related counter accept"},
+	})
+	tm.Create(nftables.RuleDesc{
+		Chain: chainFilterFwdOut(n.config.IfName),
+		Group: initialRuleGroup,
+		Rule:  []string{"ct state established,related counter accept"},
+	})
 
 	iccVerdict := "accept"
 	if !n.config.ICC {
@@ -132,68 +112,64 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 
 	if n.config.Internal {
 		// Drop anything that's not from this network.
-		cf, err = fwdInChain.AppendRuleCf(ctx, initialRuleGroup,
-			`iifname != %s counter drop comment "INTERNAL NETWORK INGRESS"`, n.config.IfName)
-		if err != nil {
-			return nil, fmt.Errorf("adding INTERNAL NETWORK ingress rule for %q: %w", n.config.IfName, err)
-		}
-		cleanup.Add(cf)
-
-		cf, err = fwdOutChain.AppendRuleCf(ctx, initialRuleGroup,
-			`oifname != %s counter drop comment "INTERNAL NETWORK EGRESS"`, n.config.IfName)
-		if err != nil {
-			return nil, fmt.Errorf("adding INTERNAL NETWORK egress rule for %q: %w", n.config.IfName, err)
-		}
-		cleanup.Add(cf)
+		tm.Create(nftables.RuleDesc{
+			Chain: fwdInChain,
+			Group: initialRuleGroup,
+			Rule:  []string{`iifname != `, n.config.IfName, `counter drop comment "INTERNAL NETWORK INGRESS"`},
+		})
+		tm.Create(nftables.RuleDesc{
+			Chain: fwdOutChain,
+			Group: initialRuleGroup,
+			Rule:  []string{`oifname != `, n.config.IfName, `counter drop comment "INTERNAL NETWORK EGRESS"`},
+		})
 
 		// Accept or drop Inter-Container Communication.
-		cf, err = fwdInChain.AppendRuleCf(ctx, fwdInICCRuleGroup, "counter %s comment ICC", iccVerdict)
-		if err != nil {
-			return nil, fmt.Errorf("adding ICC ingress rule for %q: %w", n.config.IfName, err)
-		}
-		cleanup.Add(cf)
+		tm.Create(nftables.RuleDesc{
+			Chain: fwdInChain,
+			Group: fwdInICCRuleGroup,
+			Rule:  []string{"counter", iccVerdict, "comment ICC"},
+		})
 	} else {
 		// Inter-Container Communication
-		cf, err = fwdInChain.AppendRuleCf(ctx, fwdInICCRuleGroup, "iifname == %s counter %s comment ICC",
-			n.config.IfName, iccVerdict)
-		if err != nil {
-			return nil, fmt.Errorf("adding ICC rule for %q: %w", n.config.IfName, err)
-		}
-		cleanup.Add(cf)
+		tm.Create(nftables.RuleDesc{
+			Chain: fwdInChain,
+			Group: fwdInICCRuleGroup,
+			Rule:  []string{"iifname ==", n.config.IfName, "counter", iccVerdict, "comment ICC"},
+		})
 
 		// Outgoing traffic
-		cf, err = fwdOutChain.AppendRuleCf(ctx, initialRuleGroup, "counter accept comment OUTGOING")
-		if err != nil {
-			return nil, fmt.Errorf("adding OUTGOING rule for %q: %w", n.config.IfName, err)
-		}
-		cleanup.Add(cf)
+		tm.Create(nftables.RuleDesc{
+			Chain: fwdOutChain,
+			Group: initialRuleGroup,
+			Rule:  []string{"counter accept comment OUTGOING"},
+		})
 
 		// Incoming traffic
 		if conf.Unprotected {
-			cf, err = fwdInChain.AppendRuleCf(ctx, fwdInFinalRuleGroup, `counter accept comment "UNPROTECTED"`)
-			if err != nil {
-				return nil, fmt.Errorf("adding UNPROTECTED for %q: %w", n.config.IfName, err)
-			}
-			cleanup.Add(cf)
+			tm.Create(nftables.RuleDesc{
+				Chain: fwdInChain,
+				Group: fwdInFinalRuleGroup,
+				Rule:  []string{`counter accept comment "UNPROTECTED"`},
+			})
 		} else {
-			cf, err = fwdInChain.AppendRuleCf(ctx, fwdInFinalRuleGroup, `counter drop comment "UNPUBLISHED PORT DROP"`)
-			if err != nil {
-				return nil, fmt.Errorf("adding UNPUBLISHED PORT DROP for %q: %w", n.config.IfName, err)
-			}
-			cleanup.Add(cf)
+			tm.Create(nftables.RuleDesc{
+				Chain: fwdInChain,
+				Group: fwdInFinalRuleGroup,
+				Rule:  []string{`counter drop comment "UNPUBLISHED PORT DROP"`},
+			})
 		}
 
 		// ICMP
 		if conf.Routed {
 			rule := "ip protocol icmp"
-			if table.Family() == nftables.IPv6 {
+			if tm.Family() == nftables.IPv6 {
 				rule = "meta l4proto ipv6-icmp"
 			}
-			cf, err = fwdInChain.AppendRuleCf(ctx, initialRuleGroup, rule+" counter accept comment ICMP")
-			if err != nil {
-				return nil, fmt.Errorf("adding ICMP rule for %q: %w", n.config.IfName, err)
-			}
-			cleanup.Add(cf)
+			tm.Create(nftables.RuleDesc{
+				Chain: fwdInChain,
+				Group: initialRuleGroup,
+				Rule:  []string{rule, "counter accept comment ICMP"},
+			})
 		}
 
 		// Masquerade / SNAT - masquerade picks a source IP address based on next-hop, SNAT uses conf.HostIP.
@@ -204,34 +180,34 @@ func (n *network) configure(ctx context.Context, table nftables.TableRef, conf f
 			natPostroutingComment = "SNAT"
 		}
 		if n.config.Masquerade && !conf.Routed {
-			cf, err = natPostroutingOut.AppendRuleCf(ctx, initialRuleGroup, `oifname != %s %s saddr %s counter %s comment "%s"`,
-				n.config.IfName, table.Family(), conf.Prefix, natPostroutingVerdict, natPostroutingComment)
-			if err != nil {
-				return nil, fmt.Errorf("adding NAT rule for %q: %w", n.config.IfName, err)
-			}
-			cleanup.Add(cf)
+			tm.Create(nftables.RuleDesc{
+				Chain: natPostRtOutChain,
+				Group: initialRuleGroup,
+				Rule: []string{
+					"oifname !=", n.config.IfName, string(tm.Family()), "saddr", conf.Prefix.String(), "counter",
+					natPostroutingVerdict, "comment", natPostroutingComment,
+				},
+			})
 		}
 		if n.fw.config.Hairpin {
-			// Masquerade/SNAT traffic from localhost.
-			cf, err = natPostroutingIn.AppendRuleCf(ctx, initialRuleGroup, `fib saddr type local counter %s comment "%s FROM HOST"`,
-				natPostroutingVerdict, natPostroutingComment)
-			if err != nil {
-				return nil, fmt.Errorf("adding NAT local rule for %q: %w", n.config.IfName, err)
-			}
-			cleanup.Add(cf)
+			tm.Create(nftables.RuleDesc{
+				Chain: natPostRtInChain,
+				Group: initialRuleGroup,
+				Rule: []string{
+					`fib saddr type local counter`, natPostroutingVerdict, `comment "` + natPostroutingComment + ` FROM HOST"`,
+				},
+			})
 		}
 	}
 
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{
 		"bridge": n.config.IfName,
-		"family": table.Family(),
+		"family": tm.Family(),
 	}))
-	if err := nftApply(ctx, table); err != nil {
-		return nil, fmt.Errorf("adding rules for bridge %s: %w", n.config.IfName, err)
+	if err := tm.Apply(ctx); err != nil {
+		return nftables.TableModifier{}, fmt.Errorf("adding rules for bridge %s: %w", n.config.IfName, err)
 	}
-	applied = true
-
-	return cleanup.Release(), nil
+	return tm.Reverse(), nil
 }
 
 func (n *network) ReapplyNetworkLevelRules(ctx context.Context) error {
@@ -241,13 +217,18 @@ func (n *network) ReapplyNetworkLevelRules(ctx context.Context) error {
 }
 
 func (n *network) DelNetworkLevelRules(ctx context.Context) error {
-	if n.cleaner != nil {
-		ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{"bridge": n.config.IfName}))
-		if err := n.cleaner(ctx); err != nil {
-			log.G(ctx).WithError(err).Warn("Failed to remove network rules for network")
+	remove := func(remover nftables.TableModifier) {
+		if remover.IsValid() {
+			ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{"bridge": n.config.IfName}))
+			if err := remover.Apply(ctx); err != nil {
+				log.G(ctx).WithError(err).Warn("Failed to remove network rules for network")
+			}
 		}
-		n.cleaner = nil
 	}
+	remove(n.remover4)
+	n.remover4 = nftables.TableModifier{}
+	remove(n.remover6)
+	n.remover6 = nftables.TableModifier{}
 	return nil
 }
 
