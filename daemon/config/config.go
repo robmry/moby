@@ -15,6 +15,7 @@ import (
 	"github.com/containerd/log"
 	"github.com/docker/docker/api"
 	"github.com/docker/docker/api/types/versions"
+	"github.com/docker/docker/daemon/libnetwork"
 	"github.com/docker/docker/daemon/pkg/opts"
 	dopts "github.com/docker/docker/internal/opts"
 	"github.com/docker/docker/registry"
@@ -76,13 +77,14 @@ const (
 // Use this to differentiate these options
 // with others like the ones in TLSOptions.
 var flatOptions = map[string]bool{
-	"cluster-store-opts":   true,
-	"default-network-opts": true,
-	"log-opts":             true,
-	"runtimes":             true,
-	"default-ulimits":      true,
-	"features":             true,
-	"builder":              true,
+	"cluster-store-opts":         true,
+	"default-network-opts":       true,
+	"bridge-nftables-priorities": true,
+	"log-opts":                   true,
+	"runtimes":                   true,
+	"default-ulimits":            true,
+	"features":                   true,
+	"builder":                    true,
 }
 
 // skipValidateOptions contains configuration keys
@@ -148,6 +150,9 @@ type NetworkConfig struct {
 	NetworkControlPlaneMTU int `json:"network-control-plane-mtu,omitempty"`
 	// Default options for newly created networks
 	DefaultNetworkOpts map[string]map[string]string `json:"default-network-opts,omitempty"`
+	// FirewallBackend overrides the daemon's default selection of firewall
+	// implementation (iptables/nftables). Can only be configured on Linux.
+	FirewallBackend string `json:"firewall-backend,omitempty"`
 }
 
 // TLSOptions defines TLS configuration for the daemon server.
@@ -760,6 +765,10 @@ func Validate(config *Config) error {
 	}
 
 	if _, err := parseExecOptions(config.ExecOptions); err != nil {
+		return err
+	}
+
+	if err := libnetwork.ValidateFirewallBackend(config.FirewallBackend); err != nil {
 		return err
 	}
 
