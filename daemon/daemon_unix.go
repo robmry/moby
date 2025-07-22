@@ -938,6 +938,7 @@ func networkPlatformOptions(conf *config.Config) []nwconfig.Option {
 				"EnableIP6Tables":          conf.BridgeConfig.EnableIP6Tables,
 				"Hairpin":                  !conf.EnableUserlandProxy || conf.UserlandProxyPath == "",
 				"AllowDirectRouting":       conf.BridgeConfig.AllowDirectRouting,
+				"NftablesPriorities":       conf.NftablesPriorities,
 			},
 		}),
 	}
