@@ -174,8 +174,10 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 // Network represents a logical connectivity zone that containers may
 // join using the Link method. A network is managed by a specific driver.
 type Network struct {
+	// These fields are immutable after network creation and do not require mutex protection
+	name string
+
 	ctrlr            *Controller
-	name             string
 	networkType      string // networkType is the name of the netdriver used by this network
 	id               string
 	created          time.Time
@@ -220,9 +222,6 @@ const (
 
 // Name returns a user chosen name for this network.
 func (n *Network) Name() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.name
 }
 
@@ -1002,7 +1001,6 @@ func (n *Network) Delete(options ...NetworkDeleteOption) error {
 func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	n.mu.Lock()
 	c := n.ctrlr
-	name := n.name
 	id := n.id
 	n.mu.Unlock()
 
@@ -1011,7 +1009,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 
 	n, err := c.getNetworkFromStore(id)
 	if err != nil {
-		return errdefs.NotFound(fmt.Errorf("unknown network %s id %s", name, id))
+		return errdefs.NotFound(fmt.Errorf("unknown network %s id %s", n.name, id))
 	}
 
 	// Only remove ingress on force removal or explicit LB endpoint removal
@@ -1022,7 +1020,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	if !force && n.configOnly {
 		refNws := c.findNetworks(filterNetworkByConfigFrom(n.name))
 		if len(refNws) > 0 {
-			return types.ForbiddenErrorf("configuration network %q is in use", n.Name())
+			return types.ForbiddenErrorf("configuration network %q is in use", n.name)
 		}
 	}
 
@@ -1062,7 +1060,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	// Mark the network for deletion
 	n.inDelete = true
 	if err = c.storeNetwork(context.TODO(), n); err != nil {
-		return fmt.Errorf("error marking network %s (%s) for deletion: %v", n.Name(), n.ID(), err)
+		return fmt.Errorf("error marking network %s (%s) for deletion: %v", n.name, n.ID(), err)
 	}
 
 	if n.configOnly {
@@ -1079,7 +1077,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	// bindings cleanup requires the network in the store.
 	n.cancelDriverWatches()
 	if err = n.leaveCluster(); err != nil {
-		log.G(context.TODO()).Errorf("Failed leaving network %s from the agent cluster: %v", n.Name(), err)
+		log.G(context.TODO()).Errorf("Failed leaving network %s from the agent cluster: %v", n.name, err)
 	}
 
 	// Cleanup the service discovery for this network
@@ -1097,7 +1095,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 		if !force {
 			return err
 		}
-		log.G(context.TODO()).Debugf("driver failed to delete stale network %s (%s): %v", n.Name(), n.ID(), err)
+		log.G(context.TODO()).Debugf("driver failed to delete stale network %s (%s): %v", n.name, n.ID(), err)
 	}
 
 removeFromStore:
@@ -1112,7 +1110,7 @@ removeFromStore:
 	// always find it's zero (which is usually correct because the daemon had
 	// stopped), but older daemons fix it on startup anyway.
 	if err = c.deleteFromStore(&endpointCnt{n: n}); err != nil {
-		log.G(context.TODO()).Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.Name(), n.ID(), err)
+		log.G(context.TODO()).Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.name, n.ID(), err)
 	}
 
 	if err = c.deleteStoredNetwork(n); err != nil {
@@ -1154,7 +1152,7 @@ func (n *Network) addEndpoint(ctx context.Context, ep *Endpoint) error {
 	err = d.CreateEndpoint(ctx, n.id, ep.id, ep.Iface(), ep.generic)
 	if err != nil {
 		return types.InternalErrorf("failed to create endpoint %s on network %s: %v",
-			ep.Name(), n.Name(), err)
+			ep.Name(), n.name, err)
 	}
 
 	return nil
@@ -1173,7 +1171,7 @@ func (n *Network) CreateEndpoint(ctx context.Context, name string, options ...En
 	}
 
 	if _, err = n.EndpointByName(name); err == nil {
-		return nil, types.ForbiddenErrorf("endpoint with name %s already exists in network %s", name, n.Name())
+		return nil, types.ForbiddenErrorf("endpoint with name %s already exists in network %s", name, n.name)
 	}
 
 	n.ctrlr.networkLocker.Lock(n.id)
@@ -1531,7 +1529,7 @@ func (n *Network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 
 	*infoList = make([]*IpamInfo, len(*cfgList))
 
-	log.G(context.TODO()).Debugf("Allocating IPv%d pools for network %s (%s)", ipVer, n.Name(), n.ID())
+	log.G(context.TODO()).Debugf("Allocating IPv%d pools for network %s (%s)", ipVer, n.name, n.ID())
 
 	for i, cfg := range *cfgList {
 		if err = cfg.Validate(); err != nil {
@@ -1566,7 +1564,7 @@ func (n *Network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 		defer func() {
 			if err != nil {
 				if err := ipam.ReleasePool(d.PoolID); err != nil {
-					log.G(context.TODO()).Warnf("Failed to release address pool %s after failure to create network %s (%s)", d.PoolID, n.Name(), n.ID())
+					log.G(context.TODO()).Warnf("Failed to release address pool %s after failure to create network %s (%s)", d.PoolID, n.name, n.ID())
 				}
 			}
 		}()
@@ -1599,7 +1597,7 @@ func (n *Network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 			d.IPAMData.AuxAddresses = make(map[string]*net.IPNet, len(cfg.AuxAddresses))
 			for k, v := range cfg.AuxAddresses {
 				if ip = net.ParseIP(v); ip == nil {
-					return types.InvalidParameterErrorf("non parsable secondary ip address (%s:%s) passed for network %s", k, v, n.Name())
+					return types.InvalidParameterErrorf("non parsable secondary ip address (%s:%s) passed for network %s", k, v, n.name)
 				}
 				if !d.Pool.Contains(ip) {
 					return types.ForbiddenErrorf("auxiliary address: (%s:%s) must belong to the master pool: %s", k, v, d.Pool)
@@ -1621,7 +1619,7 @@ func (n *Network) ipamRelease() {
 	}
 	ipam, _, err := n.getController().getIPAMDriver(n.ipamType)
 	if err != nil {
-		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver to release address pool(s) on delete of network %s (%s): %v", n.Name(), n.ID(), err)
+		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver to release address pool(s) on delete of network %s (%s): %v", n.name, n.ID(), err)
 		return
 	}
 	n.ipamReleaseVersion(4, ipam)
@@ -1645,7 +1643,7 @@ func (n *Network) ipamReleaseVersion(ipVer int, ipam ipamapi.Ipam) {
 		return
 	}
 
-	log.G(context.TODO()).Debugf("releasing IPv%d pools from network %s (%s)", ipVer, n.Name(), n.ID())
+	log.G(context.TODO()).Debugf("releasing IPv%d pools from network %s (%s)", ipVer, n.name, n.ID())
 
 	for _, d := range *infoList {
 		if d.Gateway != nil {
@@ -1653,20 +1651,20 @@ func (n *Network) ipamReleaseVersion(ipVer int, ipam ipamapi.Ipam) {
 			// no user config overrode that address, it wasn't explicitly allocated so it shouldn't
 			// be released here?
 			if err := ipam.ReleaseAddress(d.PoolID, d.Gateway.IP); err != nil {
-				log.G(context.TODO()).Warnf("Failed to release gateway ip address %s on delete of network %s (%s): %v", d.Gateway.IP, n.Name(), n.ID(), err)
+				log.G(context.TODO()).Warnf("Failed to release gateway ip address %s on delete of network %s (%s): %v", d.Gateway.IP, n.name, n.ID(), err)
 			}
 		}
 		if d.IPAMData.AuxAddresses != nil {
 			for k, nw := range d.IPAMData.AuxAddresses {
 				if d.Pool.Contains(nw.IP) {
 					if err := ipam.ReleaseAddress(d.PoolID, nw.IP); err != nil && !errors.Is(err, ipamapi.ErrIPOutOfRange) {
-						log.G(context.TODO()).Warnf("Failed to release secondary ip address %s (%v) on delete of network %s (%s): %v", k, nw.IP, n.Name(), n.ID(), err)
+						log.G(context.TODO()).Warnf("Failed to release secondary ip address %s (%v) on delete of network %s (%s): %v", k, nw.IP, n.name, n.ID(), err)
 					}
 				}
 			}
 		}
 		if err := ipam.ReleasePool(d.PoolID); err != nil {
-			log.G(context.TODO()).Warnf("Failed to release address pool %s on delete of network %s (%s): %v", d.PoolID, n.Name(), n.ID(), err)
+			log.G(context.TODO()).Warnf("Failed to release address pool %s on delete of network %s (%s): %v", d.PoolID, n.name, n.ID(), err)
 		}
 	}
 
@@ -1908,7 +1906,7 @@ func (n *Network) ResolveName(ctx context.Context, req string, ipType types.IPFa
 	networkID := n.ID()
 
 	_, span := otel.Tracer("").Start(ctx, "Network.ResolveName", trace.WithAttributes(
-		attribute.String("libnet.network.name", n.Name()),
+		attribute.String("libnet.network.name", n.name),
 		attribute.String("libnet.network.id", networkID),
 	))
 	defer span.End()
@@ -1977,7 +1975,7 @@ func (n *Network) ResolveIP(_ context.Context, ip string) string {
 		return ""
 	}
 
-	nwName := n.Name()
+	nwName := n.name
 
 	elemSet, ok := sr.ipMap.Get(ip)
 	if !ok || len(elemSet) == 0 {
@@ -2059,7 +2057,7 @@ func (n *Network) NdotsSet() bool {
 func (c *Controller) getConfigNetwork(name string) (*Network, error) {
 	var n *Network
 	c.WalkNetworks(func(current *Network) bool {
-		if current.ConfigOnly() && current.Name() == name {
+		if current.ConfigOnly() && current.name == name {
 			n = current
 			return true
 		}
@@ -2131,7 +2129,6 @@ func (n *Network) createLoadBalancerSandbox() (retErr error) {
 func (n *Network) deleteLoadBalancerSandbox() error {
 	n.mu.Lock()
 	c := n.ctrlr
-	name := n.name
 	n.mu.Unlock()
 
 	sandboxName := n.lbSandboxName()
@@ -2139,7 +2136,7 @@ func (n *Network) deleteLoadBalancerSandbox() error {
 
 	endpoint, err := n.EndpointByName(endpointName)
 	if err != nil {
-		log.G(context.TODO()).Warnf("Failed to find load balancer endpoint %s on network %s: %v", endpointName, name, err)
+		log.G(context.TODO()).Warnf("Failed to find load balancer endpoint %s on network %s: %v", endpointName, n.name, err)
 	} else {
 		info := endpoint.Info()
 		if info != nil {

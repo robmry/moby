@@ -39,7 +39,7 @@ func (n *Network) addLBBackend(ip net.IP, lb *loadBalancer) {
 	}
 
 	if sourceVIP == "" {
-		log.G(context.TODO()).Errorf("Failed to find load balancer IP for network %s", n.Name())
+		log.G(context.TODO()).Errorf("Failed to find load balancer IP for network %s", n.name)
 		return
 	}
 
@@ -76,7 +76,7 @@ func (n *Network) addLBBackend(ip net.IP, lb *loadBalancer) {
 	ilbPolicy, err := hcsshim.AddLoadBalancer(endpoints, true, sourceVIP, vip.String(), 0, 0, 0)
 	if err != nil {
 		log.G(context.TODO()).Errorf("Failed to add ILB policy for service %s (%s) with endpoints %v using load balancer IP %s on network %s: %v",
-			lb.service.name, vip.String(), endpoints, sourceVIP, n.Name(), err)
+			lb.service.name, vip.String(), endpoints, sourceVIP, n.name, err)
 		return
 	}
 
@@ -111,7 +111,7 @@ func (n *Network) addLBBackend(ip net.IP, lb *loadBalancer) {
 		lbPolicylistMap[lb].elb, err = hcsshim.AddLoadBalancer(endpoints, false, sourceVIP, "", protocol, uint16(port.TargetPort), uint16(port.PublishedPort))
 		if err != nil {
 			log.G(context.TODO()).Errorf("Failed to add ELB policy for service %s (ip:%s target port:%v published port:%v) with endpoints %v using load balancer IP %s on network %s: %v",
-				lb.service.name, vip.String(), uint16(port.TargetPort), uint16(port.PublishedPort), endpoints, sourceVIP, n.Name(), err)
+				lb.service.name, vip.String(), uint16(port.TargetPort), uint16(port.PublishedPort), endpoints, sourceVIP, n.name, err)
 			return
 		}
 	}

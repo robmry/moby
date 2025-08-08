@@ -53,7 +53,7 @@ func (n *Network) startResolver() {
 		return
 	}
 	n.resolverOnce.Do(func() {
-		log.G(context.TODO()).Debugf("Launching DNS server for network %q", n.Name())
+		log.G(context.TODO()).Debugf("Launching DNS server for network %q", n.name)
 		hnsid := n.DriverOptions()[windows.HNSID]
 		if hnsid == "" {
 			return
@@ -61,7 +61,7 @@ func (n *Network) startResolver() {
 
 		hnsresponse, err := hcsshim.HNSNetworkRequest(http.MethodGet, hnsid, "")
 		if err != nil {
-			log.G(context.TODO()).Errorf("Resolver Setup/Start failed for container %s, %q", n.Name(), err)
+			log.G(context.TODO()).Errorf("Resolver Setup/Start failed for container %s, %q", n.name, err)
 			return
 		}
 
@@ -69,15 +69,15 @@ func (n *Network) startResolver() {
 			if subnet.GatewayAddress != "" {
 				for i := 0; i < 3; i++ {
 					resolver := NewResolver(subnet.GatewayAddress, true, n)
-					log.G(context.TODO()).Debugf("Binding a resolver on network %s gateway %s", n.Name(), subnet.GatewayAddress)
+					log.G(context.TODO()).Debugf("Binding a resolver on network %s gateway %s", n.name, subnet.GatewayAddress)
 					n.dnsCompartment = hnsresponse.DNSServerCompartment
 					n.ExecFunc(resolver.SetupFunc(53))
 
 					if err = resolver.Start(); err != nil {
-						log.G(context.TODO()).Errorf("Resolver Setup/Start failed for container %s, %q", n.Name(), err)
+						log.G(context.TODO()).Errorf("Resolver Setup/Start failed for container %s, %q", n.name, err)
 						time.Sleep(1 * time.Second)
 					} else {
-						log.G(context.TODO()).Debugf("Resolver bound successfully for network %s", n.Name())
+						log.G(context.TODO()).Debugf("Resolver bound successfully for network %s", n.name)
 						n.resolver = append(n.resolver, resolver)
 						break
 					}
@@ -97,7 +97,7 @@ var hnsOwnedNetNames = map[string]struct{}{
 // network should be removed. For example, it may have active endpoints.
 func (n *Network) IsPruneable() bool {
 	// Predefined networks (nat, host, ...) should never be removed.
-	name := n.Name()
+	name := n.name
 	if networkSettings.IsPredefined(name) {
 		return false
 	}

@@ -467,7 +467,7 @@ func (sb *Sandbox) resolveName(ctx context.Context, nameOrAlias string, networkN
 		}
 
 		nw := ep.getNetwork()
-		if networkName != "" && networkName != nw.Name() {
+		if networkName != "" && networkName != nw.name {
 			continue
 		}
 
@@ -676,7 +676,7 @@ func (ep *Endpoint) Less(epj *Endpoint) bool {
 		return gwCounti > gwCountj
 	}
 
-	return ep.network.Name() < epj.network.Name()
+	return ep.network.name < epj.network.name
 }
 
 func (sb *Sandbox) NdotsSet() bool {

@@ -198,7 +198,7 @@ func New(ctx context.Context, cfgOptions ...config.Option) (_ *Controller, retEr
 	c.WalkNetworks(func(nw *Network) bool {
 		if n := nw; n.hasSpecialDriver() && !n.ConfigOnly() {
 			if err := n.getController().addNetwork(ctx, n); err != nil {
-				log.G(ctx).Warnf("Failed to populate network %q with driver %q", nw.Name(), nw.Type())
+				log.G(ctx).Warnf("Failed to populate network %q with driver %q", nw.name, nw.Type())
 			}
 		}
 		return false
@@ -760,7 +760,7 @@ var joinCluster NetworkWalker = func(nw *Network) bool {
 		return false
 	}
 	if err := nw.joinCluster(); err != nil {
-		log.G(context.TODO()).Errorf("Failed to join network %s (%s) into agent cluster: %v", nw.Name(), nw.ID(), err)
+		log.G(context.TODO()).Errorf("Failed to join network %s (%s) into agent cluster: %v", nw.name, nw.ID(), err)
 	}
 	nw.addDriverWatches()
 	return false
@@ -806,17 +806,17 @@ func (c *Controller) reservePools() {
 		}
 		// Reserve pools
 		if err := n.ipamAllocate(); err != nil {
-			log.G(context.TODO()).Warnf("Failed to allocate ipam pool(s) for network %q (%s): %v", n.Name(), n.ID(), err)
+			log.G(context.TODO()).Warnf("Failed to allocate ipam pool(s) for network %q (%s): %v", n.name, n.ID(), err)
 		}
 		// Reserve existing endpoints' addresses
 		ipam, _, err := n.getController().getIPAMDriver(n.ipamType)
 		if err != nil {
-			log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s) during address reservation", n.Name(), n.ID())
+			log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s) during address reservation", n.name, n.ID())
 			continue
 		}
 		epl, err := n.getEndpointsFromStore()
 		if err != nil {
-			log.G(context.TODO()).Warnf("Failed to retrieve list of current endpoints on network %q (%s)", n.Name(), n.ID())
+			log.G(context.TODO()).Warnf("Failed to retrieve list of current endpoints on network %q (%s)", n.name, n.ID())
 			continue
 		}
 		for _, ep := range epl {
@@ -826,7 +826,7 @@ func (c *Controller) reservePools() {
 			}
 			if err := ep.assignAddress(ipam, ep.Iface().Address() != nil, ep.Iface().AddressIPv6() != nil); err != nil {
 				log.G(context.TODO()).Warnf("Failed to reserve current address for endpoint %q (%s) on network %q (%s)",
-					ep.Name(), ep.ID(), n.Name(), n.ID())
+					ep.Name(), ep.ID(), n.name, n.ID())
 			}
 		}
 	}
@@ -835,7 +835,7 @@ func (c *Controller) reservePools() {
 func doReplayPoolReserve(n *Network) bool {
 	_, caps, err := n.getController().getIPAMDriver(n.ipamType)
 	if err != nil {
-		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s): %v", n.Name(), n.ID(), err)
+		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s): %v", n.name, n.ID(), err)
 		return false
 	}
 	return caps.RequiresRequestReplay
@@ -889,7 +889,7 @@ func (c *Controller) NetworkByName(name string) (*Network, error) {
 	var n *Network
 
 	c.WalkNetworks(func(current *Network) bool {
-		if current.Name() == name {
+		if current.name == name {
 			n = current
 			return true
 		}

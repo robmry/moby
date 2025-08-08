@@ -83,7 +83,7 @@ func (n *Network) getEndpointsFromStore() ([]*Endpoint, error) {
 	if err != nil {
 		if !errors.Is(err, datastore.ErrKeyNotFound) {
 			return nil, fmt.Errorf("failed to get endpoints for network %s: %w",
-				n.Name(), err)
+				n.name, err)
 		}
 		return nil, nil
 	}
@@ -130,7 +130,7 @@ retry:
 func (c *Controller) networkCleanup() {
 	for _, n := range c.getNetworksFromStore(context.TODO()) {
 		if n.inDelete {
-			log.G(context.TODO()).Infof("Removing stale network %s (%s)", n.Name(), n.ID())
+			log.G(context.TODO()).Infof("Removing stale network %s (%s)", n.name, n.ID())
 			if err := n.delete(true, true); err != nil {
 				log.G(context.TODO()).Debugf("Error while removing stale network: %v", err)
 			}

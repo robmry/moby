@@ -76,5 +76,5 @@ func (n *Network) validatedAdvertiseAddrInterval() (*time.Duration, error) {
 // "docker network prune" (or system prune). The caller must still check that the
 // network should be removed. For example, it may have active endpoints.
 func (n *Network) IsPruneable() bool {
-	return !network.IsPredefined(n.Name())
+	return !network.IsPredefined(n.name)
 }

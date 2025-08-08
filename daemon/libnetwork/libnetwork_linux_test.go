@@ -160,7 +160,7 @@ func TestNetworkName(t *testing.T) {
 		assert.Check(t, n.Delete())
 	}()
 
-	assert.Check(t, is.Equal(n.Name(), networkName))
+	assert.Check(t, is.Equal(n.name, networkName))
 }
 
 func TestNetworkType(t *testing.T) {
@@ -463,7 +463,7 @@ func TestNetworkEndpointsWalkers(t *testing.T) {
 	var netName string
 	var netWanted *libnetwork.Network
 	nwWlk := func(nw *libnetwork.Network) bool {
-		if nw.Name() == netName {
+		if nw.name == netName {
 			netWanted = nw
 			return true
 		}

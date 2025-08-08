@@ -497,7 +497,7 @@ func (ep *Endpoint) sbJoin(ctx context.Context, sb *Sandbox, options ...Endpoint
 
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{
 		"nid": stringid.TruncateID(n.ID()),
-		"net": n.Name(),
+		"net": n.name,
 		"eid": stringid.TruncateID(ep.ID()),
 		"ep":  ep.Name(),
 	}))
@@ -571,7 +571,7 @@ func (ep *Endpoint) sbJoin(ctx context.Context, sb *Sandbox, options ...Endpoint
 		return err
 	}
 
-	if err := addEpToResolver(ctx, n.Name(), ep.Name(), &sb.config, ep.iface, n.Resolvers()); err != nil {
+	if err := addEpToResolver(ctx, n.name, ep.Name(), &sb.config, ep.iface, n.Resolvers()); err != nil {
 		return errdefs.System(err)
 	}
 
@@ -769,7 +769,7 @@ func (ep *Endpoint) sbLeave(ctx context.Context, sb *Sandbox, force bool) error 
 
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{
 		"nid": n.ID(),
-		"net": n.Name(),
+		"net": n.name,
 		"eid": ep.ID(),
 		"ep":  ep.Name(),
 	}))
@@ -999,7 +999,7 @@ func (ep *Endpoint) getEtcHostsAddrs() []netip.Addr {
 	defer ep.mu.Unlock()
 
 	// Do not update hosts file with internal network's endpoint IP
-	if n := ep.network; n == nil || n.ingress || n.Name() == libnGWNetwork {
+	if n := ep.network; n == nil || n.ingress || n.name == libnGWNetwork {
 		return nil
 	}
 
@@ -1162,7 +1162,7 @@ func (ep *Endpoint) assignAddress(ipam ipamapi.Ipam, assignIPv4, assignIPv6 bool
 		return nil
 	}
 
-	log.G(context.TODO()).Debugf("Assigning addresses for endpoint %s's interface on network %s", ep.Name(), n.Name())
+	log.G(context.TODO()).Debugf("Assigning addresses for endpoint %s's interface on network %s", ep.Name(), n.name)
 
 	if assignIPv4 {
 		if err := ep.assignAddressVersion(4, ipam); err != nil {
@@ -1233,7 +1233,7 @@ func (ep *Endpoint) assignAddressVersion(ipVer int, ipam ipamapi.Ipam) error {
 	if progAdd != nil {
 		return types.InvalidParameterErrorf("invalid address %s: It does not belong to any of this network's subnets", prefAdd)
 	}
-	return fmt.Errorf("no available IPv%d addresses on this network's address pools: %s (%s)", ipVer, n.Name(), n.ID())
+	return fmt.Errorf("no available IPv%d addresses on this network's address pools: %s (%s)", ipVer, n.name, n.ID())
 }
 
 func (ep *Endpoint) releaseAddress() {
@@ -1242,7 +1242,7 @@ func (ep *Endpoint) releaseAddress() {
 		return
 	}
 
-	log.G(context.TODO()).Debugf("Releasing addresses for endpoint %s's interface on network %s", ep.Name(), n.Name())
+	log.G(context.TODO()).Debugf("Releasing addresses for endpoint %s's interface on network %s", ep.Name(), n.name)
 
 	ipam, _, err := n.getController().getIPAMDriver(n.ipamType)
 	if err != nil {

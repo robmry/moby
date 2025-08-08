@@ -87,7 +87,7 @@ func (n *Network) addLBBackend(ip net.IP, lb *loadBalancer) {
 	}
 	ep, sb, err := n.findLBEndpointSandbox()
 	if err != nil {
-		log.G(context.TODO()).Errorf("addLBBackend %s/%s: %v", n.ID(), n.Name(), err)
+		log.G(context.TODO()).Errorf("addLBBackend %s/%s: %v", n.ID(), n.name, err)
 		return
 	}
 	if sb.osSbox == nil {
@@ -178,7 +178,7 @@ func (n *Network) rmLBBackend(ip net.IP, lb *loadBalancer, rmService bool, fullR
 	}
 	ep, sb, err := n.findLBEndpointSandbox()
 	if err != nil {
-		log.G(context.TODO()).Debugf("rmLBBackend for %s/%s: %v -- probably transient state", n.ID(), n.Name(), err)
+		log.G(context.TODO()).Debugf("rmLBBackend for %s/%s: %v -- probably transient state", n.ID(), n.name, err)
 		return
 	}
 	if sb.osSbox == nil {
