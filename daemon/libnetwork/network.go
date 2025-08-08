@@ -175,12 +175,12 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 // join using the Link method. A network is managed by a specific driver.
 type Network struct {
 	// These fields are immutable after network creation and do not require mutex protection
-	name    string
-	id      string
-	created time.Time
-
-	ctrlr       *Controller
+	name        string
+	id          string
+	created     time.Time
 	networkType string // networkType is the name of the netdriver used by this network
+
+	ctrlr *Controller
 	scope            string // network data scope
 	labels           map[string]string
 	ipamType         string // ipamType is the name of the IPAM driver
@@ -236,9 +236,6 @@ func (n *Network) Created() time.Time {
 
 // Type returns the type of network, which corresponds to its managing driver.
 func (n *Network) Type() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.networkType
 }
 
@@ -830,7 +827,7 @@ func NetworkOptionIpam(ipamDriver string, addrSpace string, ipV4 []*IpamConf, ip
 		if ipamDriver != "" {
 			n.ipamType = ipamDriver
 			if ipamDriver == defaultipam.DriverName {
-				n.ipamType = defaultIpamForNetworkType(n.Type())
+				n.ipamType = defaultIpamForNetworkType(n.networkType)
 			}
 		}
 		n.ipamOptions = opts
@@ -1883,7 +1880,7 @@ func (n *Network) UpdateIpamConfig(ipV4Data []driverapi.IPAMData) {
 
 // Special drivers are ones which do not need to perform any Network plumbing
 func (n *Network) hasSpecialDriver() bool {
-	return n.Type() == "host" || n.Type() == "null"
+	return n.networkType == "host" || n.networkType == "null"
 }
 
 func (n *Network) hasLoadBalancerEndpoint() bool {
