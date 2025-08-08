@@ -175,12 +175,12 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 // join using the Link method. A network is managed by a specific driver.
 type Network struct {
 	// These fields are immutable after network creation and do not require mutex protection
-	name string
-	id   string
+	name    string
+	id      string
+	created time.Time
 
-	ctrlr            *Controller
-	networkType      string // networkType is the name of the netdriver used by this network
-	created          time.Time
+	ctrlr       *Controller
+	networkType string // networkType is the name of the netdriver used by this network
 	scope            string // network data scope
 	labels           map[string]string
 	ipamType         string // ipamType is the name of the IPAM driver
@@ -231,9 +231,6 @@ func (n *Network) ID() string {
 }
 
 func (n *Network) Created() time.Time {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.created
 }
 
