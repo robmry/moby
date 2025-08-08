@@ -176,10 +176,10 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 type Network struct {
 	// These fields are immutable after network creation and do not require mutex protection
 	name string
+	id   string
 
 	ctrlr            *Controller
 	networkType      string // networkType is the name of the netdriver used by this network
-	id               string
 	created          time.Time
 	scope            string // network data scope
 	labels           map[string]string
@@ -227,9 +227,6 @@ func (n *Network) Name() string {
 
 // ID returns a system generated id for this network.
 func (n *Network) ID() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.id
 }
 
@@ -1001,15 +998,14 @@ func (n *Network) Delete(options ...NetworkDeleteOption) error {
 func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	n.mu.Lock()
 	c := n.ctrlr
-	id := n.id
 	n.mu.Unlock()
 
-	c.networkLocker.Lock(id)
-	defer c.networkLocker.Unlock(id) //nolint:errcheck
+	c.networkLocker.Lock(n.id)
+	defer c.networkLocker.Unlock(n.id) //nolint:errcheck
 
-	n, err := c.getNetworkFromStore(id)
+	n, err := c.getNetworkFromStore(n.id)
 	if err != nil {
-		return errdefs.NotFound(fmt.Errorf("unknown network %s id %s", n.name, id))
+		return errdefs.NotFound(fmt.Errorf("unknown network %s id %s", n.name, n.id))
 	}
 
 	// Only remove ingress on force removal or explicit LB endpoint removal
@@ -1060,7 +1056,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	// Mark the network for deletion
 	n.inDelete = true
 	if err = c.storeNetwork(context.TODO(), n); err != nil {
-		return fmt.Errorf("error marking network %s (%s) for deletion: %v", n.name, n.ID(), err)
+		return fmt.Errorf("error marking network %s (%s) for deletion: %v", n.name, n.id, err)
 	}
 
 	if n.configOnly {
@@ -1081,13 +1077,13 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	}
 
 	// Cleanup the service discovery for this network
-	c.cleanupServiceDiscovery(n.ID())
+	c.cleanupServiceDiscovery(n.id)
 
 	// Cleanup the load balancer. On Windows this call is required
 	// to remove remote loadbalancers in VFP, and must be performed before
 	// dataplane network deletion.
 	if runtime.GOOS == "windows" {
-		c.cleanupServiceBindings(n.ID())
+		c.cleanupServiceBindings(n.id)
 	}
 
 	// Delete the network from the dataplane
@@ -1095,7 +1091,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 		if !force {
 			return err
 		}
-		log.G(context.TODO()).Debugf("driver failed to delete stale network %s (%s): %v", n.name, n.ID(), err)
+		log.G(context.TODO()).Debugf("driver failed to delete stale network %s (%s): %v", n.name, n.id, err)
 	}
 
 removeFromStore:
@@ -1110,7 +1106,7 @@ removeFromStore:
 	// always find it's zero (which is usually correct because the daemon had
 	// stopped), but older daemons fix it on startup anyway.
 	if err = c.deleteFromStore(&endpointCnt{n: n}); err != nil {
-		log.G(context.TODO()).Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.name, n.ID(), err)
+		log.G(context.TODO()).Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.name, n.id, err)
 	}
 
 	if err = c.deleteStoredNetwork(n); err != nil {
@@ -1126,7 +1122,7 @@ func (n *Network) deleteNetwork() error {
 		return fmt.Errorf("failed deleting Network: %v", err)
 	}
 
-	if err := d.DeleteNetwork(n.ID()); err != nil {
+	if err := d.DeleteNetwork(n.id); err != nil {
 		// Forbidden Errors should be honored
 		if cerrdefs.IsPermissionDenied(err) {
 			return err
@@ -1395,7 +1391,7 @@ func (n *Network) addSvcRecords(eID, name, serviceID string, epIPv4, epIPv6 net.
 	if n.ingress {
 		return
 	}
-	networkID := n.ID()
+	networkID := n.id
 	log.G(context.TODO()).Debugf("%s (%.7s).addSvcRecords(%s, %s, %s, %t) %s sid:%s", eID, networkID, name, epIPv4, epIPv6, ipMapUpdate, method, serviceID)
 
 	c := n.getController()
@@ -1431,7 +1427,7 @@ func (n *Network) deleteSvcRecords(eID, name, serviceID string, epIPv4, epIPv6 n
 	if n.ingress {
 		return
 	}
-	networkID := n.ID()
+	networkID := n.id
 	log.G(context.TODO()).Debugf("%s (%.7s).deleteSvcRecords(%s, %s, %s, %t) %s sid:%s ", eID, networkID, name, epIPv4, epIPv6, ipMapUpdate, method, serviceID)
 
 	c := n.getController()
@@ -1529,7 +1525,7 @@ func (n *Network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 
 	*infoList = make([]*IpamInfo, len(*cfgList))
 
-	log.G(context.TODO()).Debugf("Allocating IPv%d pools for network %s (%s)", ipVer, n.name, n.ID())
+	log.G(context.TODO()).Debugf("Allocating IPv%d pools for network %s (%s)", ipVer, n.name, n.id)
 
 	for i, cfg := range *cfgList {
 		if err = cfg.Validate(); err != nil {
@@ -1564,7 +1560,7 @@ func (n *Network) ipamAllocateVersion(ipVer int, ipam ipamapi.Ipam) error {
 		defer func() {
 			if err != nil {
 				if err := ipam.ReleasePool(d.PoolID); err != nil {
-					log.G(context.TODO()).Warnf("Failed to release address pool %s after failure to create network %s (%s)", d.PoolID, n.name, n.ID())
+					log.G(context.TODO()).Warnf("Failed to release address pool %s after failure to create network %s (%s)", d.PoolID, n.name, n.id)
 				}
 			}
 		}()
@@ -1619,7 +1615,7 @@ func (n *Network) ipamRelease() {
 	}
 	ipam, _, err := n.getController().getIPAMDriver(n.ipamType)
 	if err != nil {
-		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver to release address pool(s) on delete of network %s (%s): %v", n.name, n.ID(), err)
+		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver to release address pool(s) on delete of network %s (%s): %v", n.name, n.id, err)
 		return
 	}
 	n.ipamReleaseVersion(4, ipam)
@@ -1643,7 +1639,7 @@ func (n *Network) ipamReleaseVersion(ipVer int, ipam ipamapi.Ipam) {
 		return
 	}
 
-	log.G(context.TODO()).Debugf("releasing IPv%d pools from network %s (%s)", ipVer, n.name, n.ID())
+	log.G(context.TODO()).Debugf("releasing IPv%d pools from network %s (%s)", ipVer, n.name, n.id)
 
 	for _, d := range *infoList {
 		if d.Gateway != nil {
@@ -1651,20 +1647,20 @@ func (n *Network) ipamReleaseVersion(ipVer int, ipam ipamapi.Ipam) {
 			// no user config overrode that address, it wasn't explicitly allocated so it shouldn't
 			// be released here?
 			if err := ipam.ReleaseAddress(d.PoolID, d.Gateway.IP); err != nil {
-				log.G(context.TODO()).Warnf("Failed to release gateway ip address %s on delete of network %s (%s): %v", d.Gateway.IP, n.name, n.ID(), err)
+				log.G(context.TODO()).Warnf("Failed to release gateway ip address %s on delete of network %s (%s): %v", d.Gateway.IP, n.name, n.id, err)
 			}
 		}
 		if d.IPAMData.AuxAddresses != nil {
 			for k, nw := range d.IPAMData.AuxAddresses {
 				if d.Pool.Contains(nw.IP) {
 					if err := ipam.ReleaseAddress(d.PoolID, nw.IP); err != nil && !errors.Is(err, ipamapi.ErrIPOutOfRange) {
-						log.G(context.TODO()).Warnf("Failed to release secondary ip address %s (%v) on delete of network %s (%s): %v", k, nw.IP, n.name, n.ID(), err)
+						log.G(context.TODO()).Warnf("Failed to release secondary ip address %s (%v) on delete of network %s (%s): %v", k, nw.IP, n.name, n.id, err)
 					}
 				}
 			}
 		}
 		if err := ipam.ReleasePool(d.PoolID); err != nil {
-			log.G(context.TODO()).Warnf("Failed to release address pool %s on delete of network %s (%s): %v", d.PoolID, n.name, n.ID(), err)
+			log.G(context.TODO()).Warnf("Failed to release address pool %s on delete of network %s (%s): %v", d.PoolID, n.name, n.id, err)
 		}
 	}
 
@@ -1736,7 +1732,7 @@ func (n *Network) Peers() []networkdb.PeerInfo {
 		return []networkdb.PeerInfo{}
 	}
 
-	return a.networkDB.Peers(n.ID())
+	return a.networkDB.Peers(n.id)
 }
 
 func (n *Network) DriverOptions() map[string]string {
@@ -1903,7 +1899,7 @@ func (n *Network) hasLoadBalancerEndpoint() bool {
 // will be false.
 func (n *Network) ResolveName(ctx context.Context, req string, ipType types.IPFamily) ([]net.IP, bool) {
 	c := n.getController()
-	networkID := n.ID()
+	networkID := n.id
 
 	_, span := otel.Tracer("").Start(ctx, "Network.ResolveName", trace.WithAttributes(
 		attribute.String("libnet.network.name", n.name),
@@ -1945,7 +1941,7 @@ func (n *Network) ResolveName(ctx context.Context, req string, ipType types.IPFa
 }
 
 func (n *Network) HandleQueryResp(name string, ip net.IP) {
-	networkID := n.ID()
+	networkID := n.id
 	c := n.getController()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1965,7 +1961,7 @@ func (n *Network) HandleQueryResp(name string, ip net.IP) {
 }
 
 func (n *Network) ResolveIP(_ context.Context, ip string) string {
-	networkID := n.ID()
+	networkID := n.id
 	c := n.getController()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -2014,7 +2010,7 @@ func (n *Network) ResolveService(ctx context.Context, name string) ([]*net.SRV, 
 	proto := parts[1]
 	svcName := strings.Join(parts[2:], ".")
 
-	networkID := n.ID()
+	networkID := n.id
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	sr, ok := c.svcRecords[networkID]

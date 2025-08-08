@@ -52,16 +52,16 @@ func (n *Network) findLBEndpointSandbox() (*Endpoint, *Sandbox, error) {
 		}
 	}
 	if ep == nil {
-		return nil, nil, fmt.Errorf("Unable to find load balancing endpoint for network %s", n.ID())
+		return nil, nil, fmt.Errorf("Unable to find load balancing endpoint for network %s", n.id)
 	}
 	// Get the load balancer sandbox itself as well
 	sb, ok := ep.getSandbox()
 	if !ok {
-		return nil, nil, fmt.Errorf("Unable to get sandbox for %s(%s) in for %s", ep.Name(), ep.ID(), n.ID())
+		return nil, nil, fmt.Errorf("Unable to get sandbox for %s(%s) in for %s", ep.Name(), ep.ID(), n.id)
 	}
 	sep := sb.GetEndpoint(ep.ID())
 	if sep == nil {
-		return nil, nil, fmt.Errorf("Load balancing endpoint %s(%s) removed from %s", ep.Name(), ep.ID(), n.ID())
+		return nil, nil, fmt.Errorf("Load balancing endpoint %s(%s) removed from %s", ep.Name(), ep.ID(), n.id)
 	}
 	return sep, sb, nil
 }
@@ -87,7 +87,7 @@ func (n *Network) addLBBackend(ip net.IP, lb *loadBalancer) {
 	}
 	ep, sb, err := n.findLBEndpointSandbox()
 	if err != nil {
-		log.G(context.TODO()).Errorf("addLBBackend %s/%s: %v", n.ID(), n.name, err)
+		log.G(context.TODO()).Errorf("addLBBackend %s/%s: %v", n.id, n.name, err)
 		return
 	}
 	if sb.osSbox == nil {
@@ -118,7 +118,7 @@ func (n *Network) addLBBackend(ip net.IP, lb *loadBalancer) {
 		}
 		err := sb.osSbox.AddAliasIP(ifName, &net.IPNet{IP: lb.vip, Mask: net.CIDRMask(32, 32)})
 		if err != nil {
-			log.G(context.TODO()).Errorf("Failed add IP alias %s to network %s LB endpoint interface %s: %v", lb.vip, n.ID(), ifName, err)
+			log.G(context.TODO()).Errorf("Failed add IP alias %s to network %s LB endpoint interface %s: %v", lb.vip, n.id, ifName, err)
 			return
 		}
 
@@ -178,7 +178,7 @@ func (n *Network) rmLBBackend(ip net.IP, lb *loadBalancer, rmService bool, fullR
 	}
 	ep, sb, err := n.findLBEndpointSandbox()
 	if err != nil {
-		log.G(context.TODO()).Debugf("rmLBBackend for %s/%s: %v -- probably transient state", n.ID(), n.name, err)
+		log.G(context.TODO()).Debugf("rmLBBackend for %s/%s: %v -- probably transient state", n.id, n.name, err)
 		return
 	}
 	if sb.osSbox == nil {
@@ -247,7 +247,7 @@ func (n *Network) rmLBBackend(ip net.IP, lb *loadBalancer, rmService bool, fullR
 		}
 		err := sb.osSbox.RemoveAliasIP(ifName, &net.IPNet{IP: lb.vip, Mask: net.CIDRMask(32, 32)})
 		if err != nil {
-			log.G(context.TODO()).Errorf("Failed add IP alias %s to network %s LB endpoint interface %s: %v", lb.vip, n.ID(), ifName, err)
+			log.G(context.TODO()).Errorf("Failed add IP alias %s to network %s LB endpoint interface %s: %v", lb.vip, n.id, ifName, err)
 		}
 	}
 }

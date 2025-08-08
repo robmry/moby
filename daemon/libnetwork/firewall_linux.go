@@ -113,7 +113,7 @@ func (c *Controller) handleFirewallReloadService(s *service) {
 		}
 		ep, sb, err := n.findLBEndpointSandbox()
 		if err != nil {
-			log.G(context.TODO()).Warnf("handleFirewallReloadService failed to find LB Endpoint Sandbox for %s/%s: %v -- ", n.ID(), n.name, err)
+			log.G(context.TODO()).Warnf("handleFirewallReloadService failed to find LB Endpoint Sandbox for %s/%s: %v -- ", n.id, n.name, err)
 			continue
 		}
 		if sb.osSbox == nil {

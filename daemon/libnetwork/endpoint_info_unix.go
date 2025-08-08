@@ -21,5 +21,5 @@ func (ep *Endpoint) DriverInfo() (map[string]any, error) {
 		return nil, fmt.Errorf("failed to get driver info: %v", err)
 	}
 
-	return driver.EndpointOperInfo(n.ID(), ep.ID())
+	return driver.EndpointOperInfo(n.id, ep.ID())
 }

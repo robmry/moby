@@ -496,7 +496,7 @@ func (ep *Endpoint) sbJoin(ctx context.Context, sb *Sandbox, options ...Endpoint
 	}
 
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{
-		"nid": stringid.TruncateID(n.ID()),
+		"nid": stringid.TruncateID(n.id),
 		"net": n.name,
 		"eid": stringid.TruncateID(ep.ID()),
 		"ep":  ep.Name(),
@@ -520,7 +520,7 @@ func (ep *Endpoint) sbJoin(ctx context.Context, sb *Sandbox, options ...Endpoint
 		}
 	}()
 
-	nid := n.ID()
+	nid := n.id
 
 	ep.processOptions(options...)
 
@@ -680,7 +680,7 @@ func (ep *Endpoint) programExternalConnectivity(ctx context.Context, gwep4, gwep
 			"gw4":  epShortId(gwep4),
 			"gw6":  epShortId(gwep6),
 		}).Debug("Programming external connectivity on endpoint")
-		if err := ecd.ProgramExternalConnectivity(context.WithoutCancel(ctx), n.ID(), ep.ID(), epId(gwep4), epId(gwep6)); err != nil {
+		if err := ecd.ProgramExternalConnectivity(context.WithoutCancel(ctx), n.id, ep.ID(), epId(gwep4), epId(gwep6)); err != nil {
 			return types.InternalErrorf("driver failed programming external connectivity on endpoint %s (%s): %v",
 				ep.Name(), ep.ID(), err)
 		}
@@ -768,7 +768,7 @@ func (ep *Endpoint) sbLeave(ctx context.Context, sb *Sandbox, force bool) error 
 	}
 
 	ctx = log.WithLogger(ctx, log.G(ctx).WithFields(log.Fields{
-		"nid": n.ID(),
+		"nid": n.id,
 		"net": n.name,
 		"eid": ep.ID(),
 		"ep":  ep.Name(),
@@ -797,7 +797,7 @@ func (ep *Endpoint) sbLeave(ctx context.Context, sb *Sandbox, force bool) error 
 
 	if d != nil {
 		if ecd, ok := d.(driverapi.ExtConner); ok {
-			if err := ecd.ProgramExternalConnectivity(context.WithoutCancel(ctx), n.ID(), ep.ID(), "", ""); err != nil {
+			if err := ecd.ProgramExternalConnectivity(context.WithoutCancel(ctx), n.id, ep.ID(), "", ""); err != nil {
 				log.G(ctx).WithError(err).Warn("driver failed revoking external connectivity on endpoint")
 			}
 		}
@@ -1233,7 +1233,7 @@ func (ep *Endpoint) assignAddressVersion(ipVer int, ipam ipamapi.Ipam) error {
 	if progAdd != nil {
 		return types.InvalidParameterErrorf("invalid address %s: It does not belong to any of this network's subnets", prefAdd)
 	}
-	return fmt.Errorf("no available IPv%d addresses on this network's address pools: %s (%s)", ipVer, n.name, n.ID())
+	return fmt.Errorf("no available IPv%d addresses on this network's address pools: %s (%s)", ipVer, n.name, n.id)
 }
 
 func (ep *Endpoint) releaseAddress() {

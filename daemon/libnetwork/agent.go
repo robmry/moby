@@ -469,7 +469,7 @@ func (n *Network) Services() map[string]ServiceInfo {
 	if !ok {
 		return nil
 	}
-	nwID := n.ID()
+	nwID := n.id
 	d, err := n.driver(true)
 	if err != nil {
 		log.G(context.TODO()).Errorf("Could not resolve driver for network %s/%s while fetching services: %v", n.networkType, nwID, err)
@@ -554,7 +554,7 @@ func (n *Network) joinCluster() error {
 	if !ok {
 		return nil
 	}
-	return agent.networkDB.JoinNetwork(n.ID())
+	return agent.networkDB.JoinNetwork(n.id)
 }
 
 func (n *Network) leaveCluster() error {
@@ -562,7 +562,7 @@ func (n *Network) leaveCluster() error {
 	if !ok {
 		return nil
 	}
-	return agent.networkDB.LeaveNetwork(n.ID())
+	return agent.networkDB.LeaveNetwork(n.id)
 }
 
 func (ep *Endpoint) addDriverInfoToCluster() error {
@@ -575,7 +575,7 @@ func (ep *Endpoint) addDriverInfoToCluster() error {
 		return nil
 	}
 
-	nwID := n.ID()
+	nwID := n.id
 	for _, te := range ep.joinInfo.driverTableEntries {
 		if err := agent.networkDB.CreateEntry(te.tableName, nwID, te.key, te.value); err != nil {
 			return err
@@ -594,7 +594,7 @@ func (ep *Endpoint) deleteDriverInfoFromCluster() error {
 		return nil
 	}
 
-	nwID := n.ID()
+	nwID := n.id
 	for _, te := range ep.joinInfo.driverTableEntries {
 		if err := agent.networkDB.DeleteEntry(te.tableName, nwID, te.key); err != nil {
 			return err
@@ -644,12 +644,12 @@ func (ep *Endpoint) addServiceInfoToCluster(sb *Sandbox) error {
 		if n.ingress {
 			ingressPorts = ep.ingressPorts
 		}
-		if err := n.getController().addServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), primaryDNSName, ep.virtualIP, ingressPorts, ep.svcAliases, dnsAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
+		if err := n.getController().addServiceBinding(ep.svcName, ep.svcID, n.id, ep.ID(), primaryDNSName, ep.virtualIP, ingressPorts, ep.svcAliases, dnsAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
 			return err
 		}
 	} else {
 		// This is a container simply attached to an attachable network
-		if err := n.getController().addContainerNameResolution(n.ID(), ep.ID(), primaryDNSName, dnsAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
+		if err := n.getController().addContainerNameResolution(n.id, ep.ID(), primaryDNSName, dnsAliases, ep.Iface().Address().IP, "addServiceInfoToCluster"); err != nil {
 			return err
 		}
 	}
@@ -669,7 +669,7 @@ func (ep *Endpoint) addServiceInfoToCluster(sb *Sandbox) error {
 		return err
 	}
 
-	if err := agent.networkDB.CreateEntry(libnetworkEPTable, n.ID(), ep.ID(), buf); err != nil {
+	if err := agent.networkDB.CreateEntry(libnetworkEPTable, n.id, ep.ID(), buf); err != nil {
 		log.G(context.TODO()).Warnf("addServiceInfoToCluster NetworkDB CreateEntry failed for %s %s err:%s", ep.id, n.id, err)
 		return err
 	}
@@ -708,7 +708,7 @@ func (ep *Endpoint) deleteServiceInfoFromCluster(sb *Sandbox, fullRemove bool, m
 
 	// First update the networkDB then locally
 	if fullRemove {
-		if err := agent.networkDB.DeleteEntry(libnetworkEPTable, n.ID(), ep.ID()); err != nil {
+		if err := agent.networkDB.DeleteEntry(libnetworkEPTable, n.id, ep.ID()); err != nil {
 			log.G(context.TODO()).Warnf("deleteServiceInfoFromCluster NetworkDB DeleteEntry failed for %s %s err:%s", ep.id, n.id, err)
 		}
 	} else {
@@ -722,12 +722,12 @@ func (ep *Endpoint) deleteServiceInfoFromCluster(sb *Sandbox, fullRemove bool, m
 			if n.ingress {
 				ingressPorts = ep.ingressPorts
 			}
-			if err := n.getController().rmServiceBinding(ep.svcName, ep.svcID, n.ID(), ep.ID(), primaryDNSName, ep.virtualIP, ingressPorts, ep.svcAliases, dnsAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster", true, fullRemove); err != nil {
+			if err := n.getController().rmServiceBinding(ep.svcName, ep.svcID, n.id, ep.ID(), primaryDNSName, ep.virtualIP, ingressPorts, ep.svcAliases, dnsAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster", true, fullRemove); err != nil {
 				return err
 			}
 		} else {
 			// This is a container simply attached to an attachable network
-			if err := n.getController().delContainerNameResolution(n.ID(), ep.ID(), primaryDNSName, dnsAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
+			if err := n.getController().delContainerNameResolution(n.id, ep.ID(), primaryDNSName, dnsAliases, ep.Iface().Address().IP, "deleteServiceInfoFromCluster"); err != nil {
 				return err
 			}
 		}
@@ -744,7 +744,7 @@ func disableServiceInNetworkDB(a *nwAgent, n *Network, ep *Endpoint) {
 	log.G(context.TODO()).Debugf("disableServiceInNetworkDB for %s %s", ep.svcName, ep.ID())
 
 	// Update existing record to indicate that the service is disabled
-	inBuf, err := a.networkDB.GetEntry(libnetworkEPTable, n.ID(), ep.ID())
+	inBuf, err := a.networkDB.GetEntry(libnetworkEPTable, n.id, ep.ID())
 	if err != nil {
 		log.G(context.TODO()).Warnf("disableServiceInNetworkDB GetEntry failed for %s %s err:%s", ep.id, n.id, err)
 		return
@@ -762,7 +762,7 @@ func disableServiceInNetworkDB(a *nwAgent, n *Network, ep *Endpoint) {
 		return
 	}
 	// Send update to the whole cluster
-	if err := a.networkDB.UpdateEntry(libnetworkEPTable, n.ID(), ep.ID(), outBuf); err != nil {
+	if err := a.networkDB.UpdateEntry(libnetworkEPTable, n.id, ep.ID(), outBuf); err != nil {
 		log.G(context.TODO()).Warnf("disableServiceInNetworkDB UpdateEntry failed for %s %s err:%s", ep.id, n.id, err)
 	}
 }
@@ -778,9 +778,9 @@ func (n *Network) addDriverWatches() {
 
 	c := n.getController()
 	for _, table := range n.driverTables {
-		ch, cancel := agent.networkDB.Watch(table.name, n.ID())
+		ch, cancel := agent.networkDB.Watch(table.name, n.id)
 		agent.mu.Lock()
-		agent.driverCancelFuncs[n.ID()] = append(agent.driverCancelFuncs[n.ID()], cancel)
+		agent.driverCancelFuncs[n.id] = append(agent.driverCancelFuncs[n.id], cancel)
 		agent.mu.Unlock()
 		go c.handleTableEvents(ch, n.handleDriverTableEvent)
 	}
@@ -793,8 +793,8 @@ func (n *Network) cancelDriverWatches() {
 	}
 
 	agent.mu.Lock()
-	cancelFuncs := agent.driverCancelFuncs[n.ID()]
-	delete(agent.driverCancelFuncs, n.ID())
+	cancelFuncs := agent.driverCancelFuncs[n.id]
+	delete(agent.driverCancelFuncs, n.id)
 	agent.mu.Unlock()
 
 	for _, cancel := range cancelFuncs {
@@ -826,7 +826,7 @@ func (n *Network) handleDriverTableEvent(ev events.Event) {
 	}
 
 	event := ev.(networkdb.WatchEvent)
-	ed.EventNotify(n.ID(), event.Table, event.Key, event.Prev, event.Value)
+	ed.EventNotify(n.id, event.Table, event.Key, event.Prev, event.Value)
 }
 
 func (c *Controller) handleNodeTableEvent(ev events.Event) {

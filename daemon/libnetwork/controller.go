@@ -806,17 +806,17 @@ func (c *Controller) reservePools() {
 		}
 		// Reserve pools
 		if err := n.ipamAllocate(); err != nil {
-			log.G(context.TODO()).Warnf("Failed to allocate ipam pool(s) for network %q (%s): %v", n.name, n.ID(), err)
+			log.G(context.TODO()).Warnf("Failed to allocate ipam pool(s) for network %q (%s): %v", n.name, n.id, err)
 		}
 		// Reserve existing endpoints' addresses
 		ipam, _, err := n.getController().getIPAMDriver(n.ipamType)
 		if err != nil {
-			log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s) during address reservation", n.name, n.ID())
+			log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s) during address reservation", n.name, n.id)
 			continue
 		}
 		epl, err := n.getEndpointsFromStore()
 		if err != nil {
-			log.G(context.TODO()).Warnf("Failed to retrieve list of current endpoints on network %q (%s)", n.name, n.ID())
+			log.G(context.TODO()).Warnf("Failed to retrieve list of current endpoints on network %q (%s)", n.name, n.id)
 			continue
 		}
 		for _, ep := range epl {
@@ -826,7 +826,7 @@ func (c *Controller) reservePools() {
 			}
 			if err := ep.assignAddress(ipam, ep.Iface().Address() != nil, ep.Iface().AddressIPv6() != nil); err != nil {
 				log.G(context.TODO()).Warnf("Failed to reserve current address for endpoint %q (%s) on network %q (%s)",
-					ep.Name(), ep.ID(), n.name, n.ID())
+					ep.Name(), ep.ID(), n.name, n.id)
 			}
 		}
 	}
@@ -835,7 +835,7 @@ func (c *Controller) reservePools() {
 func doReplayPoolReserve(n *Network) bool {
 	_, caps, err := n.getController().getIPAMDriver(n.ipamType)
 	if err != nil {
-		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s): %v", n.name, n.ID(), err)
+		log.G(context.TODO()).Warnf("Failed to retrieve ipam driver for network %q (%s): %v", n.name, n.id, err)
 		return false
 	}
 	return caps.RequiresRequestReplay

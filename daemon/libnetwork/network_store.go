@@ -41,7 +41,7 @@ func (c *Controller) deleteStoredNetwork(n *Network) error {
 func (c *Controller) cacheNetwork(n *Network) {
 	c.networksMu.Lock()
 	defer c.networksMu.Unlock()
-	c.networks[n.ID()] = n
+	c.networks[n.id] = n
 }
 
 // findNetworks looks for all networks matching the filter from the in-memory
