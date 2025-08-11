@@ -182,9 +182,9 @@ type Network struct {
 	enableIPv4  bool
 	enableIPv6  bool
 	ctrlr       *Controller
+	labels      map[string]string
 
 	scope            string // network data scope
-	labels           map[string]string
 	ipamType         string // ipamType is the name of the IPAM driver
 	ipamOptions      map[string]string
 	addrSpace        string
@@ -1825,15 +1825,7 @@ func (n *Network) ConfigOnly() bool {
 }
 
 func (n *Network) Labels() map[string]string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
-	lbls := make(map[string]string, len(n.labels))
-	for k, v := range n.labels {
-		lbls[k] = v
-	}
-
-	return lbls
+	return maps.Clone(n.labels)
 }
 
 func (n *Network) TableEventRegister(tableName string, objType driverapi.ObjectType) error {
