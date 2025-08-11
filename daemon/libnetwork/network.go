@@ -179,6 +179,8 @@ type Network struct {
 	id          string
 	created     time.Time
 	networkType string // networkType is the name of the netdriver used by this network
+	enableIPv4  bool
+	enableIPv6  bool
 
 	ctrlr *Controller
 	scope            string // network data scope
@@ -190,8 +192,6 @@ type Network struct {
 	ipamV6Config     []*IpamConf
 	ipamV4Info       []*IpamInfo
 	ipamV6Info       []*IpamInfo
-	enableIPv4       bool
-	enableIPv6       bool
 	generic          options.Generic
 	dbIndex          uint64
 	dbExists         bool
@@ -1809,16 +1809,10 @@ func (n *Network) Dynamic() bool {
 }
 
 func (n *Network) IPv4Enabled() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.enableIPv4
 }
 
 func (n *Network) IPv6Enabled() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.enableIPv6
 }
 
