@@ -721,6 +721,7 @@ addToStore:
 		}
 	}()
 
+	nw.complete = true
 	if err := c.storeNetwork(ctx, nw); err != nil {
 		return nil, err
 	}

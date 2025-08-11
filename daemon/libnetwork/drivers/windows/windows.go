@@ -451,7 +451,9 @@ func (d *driver) CreateNetwork(ctx context.Context, id string, option map[string
 			hnsIPv4Data[i].Pool = subnetIP
 		}
 
-		nInfo.UpdateIpamConfig(hnsIPv4Data)
+		if err := nInfo.UpdateIpamV4Config(hnsIPv4Data); err != nil {
+			return err
+		}
 
 	} else {
 		// Delete any stale HNS endpoints for this network.

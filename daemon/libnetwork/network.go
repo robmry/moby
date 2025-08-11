@@ -175,23 +175,24 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 // join using the Link method. A network is managed by a specific driver.
 type Network struct {
 	// These fields are immutable after network creation and do not require mutex protection
-	name        string
-	id          string
-	created     time.Time
-	networkType string // networkType is the name of the netdriver used by this network
-	enableIPv4  bool
-	enableIPv6  bool
-	ctrlr       *Controller
-	labels      map[string]string
+	name         string
+	id           string
+	created      time.Time
+	complete     bool
+	networkType  string // networkType is the name of the netdriver used by this network
+	enableIPv4   bool
+	enableIPv6   bool
+	ctrlr        *Controller
+	labels       map[string]string
+	ipamType     string // ipamType is the name of the IPAM driver
+	ipamOptions  map[string]string
+	addrSpace    string
+	ipamV4Config []*IpamConf
+	ipamV6Config []*IpamConf
+	ipamV4Info   []*IpamInfo
+	ipamV6Info   []*IpamInfo
 
 	scope            string // network data scope
-	ipamType         string // ipamType is the name of the IPAM driver
-	ipamOptions      map[string]string
-	addrSpace        string
-	ipamV4Config     []*IpamConf
-	ipamV6Config     []*IpamConf
-	ipamV4Info       []*IpamInfo
-	ipamV6Info       []*IpamInfo
 	generic          options.Generic
 	dbIndex          uint64
 	dbExists         bool
@@ -727,6 +728,7 @@ func (n *Network) UnmarshalJSON(b []byte) (err error) {
 	if v, ok := netMap["skipGwAllocIPv6"]; ok {
 		n.skipGwAllocIPv6 = v.(bool)
 	}
+	n.complete = true
 	return nil
 }
 
@@ -1843,7 +1845,11 @@ func (n *Network) TableEventRegister(tableName string, objType driverapi.ObjectT
 	return nil
 }
 
-func (n *Network) UpdateIpamConfig(ipV4Data []driverapi.IPAMData) {
+func (n *Network) UpdateIpamV4Config(ipV4Data []driverapi.IPAMData) error {
+	if n.complete {
+		return errors.New("IPAM configuration cannot be modified after network construction")
+	}
+
 	ipamV4Config := make([]*IpamConf, len(ipV4Data))
 
 	for i, data := range ipV4Data {
@@ -1856,6 +1862,7 @@ func (n *Network) UpdateIpamConfig(ipV4Data []driverapi.IPAMData) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.ipamV4Config = ipamV4Config
+	return nil
 }
 
 // Special drivers are ones which do not need to perform any Network plumbing
