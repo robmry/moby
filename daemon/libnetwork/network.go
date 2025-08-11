@@ -181,8 +181,8 @@ type Network struct {
 	networkType string // networkType is the name of the netdriver used by this network
 	enableIPv4  bool
 	enableIPv6  bool
+	ctrlr       *Controller
 
-	ctrlr *Controller
 	scope            string // network data scope
 	labels           map[string]string
 	ipamType         string // ipamType is the name of the IPAM driver
@@ -990,14 +990,10 @@ func (n *Network) Delete(options ...NetworkDeleteOption) error {
 //   - controller.networkCleanup() -- (true, true)
 //     remove the network no matter what
 func (n *Network) delete(force bool, rmLBEndpoint bool) error {
-	n.mu.Lock()
-	c := n.ctrlr
-	n.mu.Unlock()
+	n.ctrlr.networkLocker.Lock(n.id)
+	defer n.ctrlr.networkLocker.Unlock(n.id) //nolint:errcheck
 
-	c.networkLocker.Lock(n.id)
-	defer c.networkLocker.Unlock(n.id) //nolint:errcheck
-
-	n, err := c.getNetworkFromStore(n.id)
+	n, err := n.ctrlr.getNetworkFromStore(n.id)
 	if err != nil {
 		return errdefs.NotFound(fmt.Errorf("unknown network %s id %s", n.name, n.id))
 	}
@@ -1008,7 +1004,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	}
 
 	if !force && n.configOnly {
-		refNws := c.findNetworks(filterNetworkByConfigFrom(n.name))
+		refNws := n.ctrlr.findNetworks(filterNetworkByConfigFrom(n.name))
 		if len(refNws) > 0 {
 			return types.ForbiddenErrorf("configuration network %q is in use", n.name)
 		}
@@ -1019,7 +1015,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	if n.hasLoadBalancerEndpoint() {
 		emptyCount = 1
 	}
-	eps := c.findEndpoints(filterEndpointByNetworkId(n.id))
+	eps := n.ctrlr.findEndpoints(filterEndpointByNetworkId(n.id))
 	if !force && len(eps) > emptyCount {
 		return &ActiveEndpointsError{
 			name: n.name,
@@ -1049,7 +1045,7 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 
 	// Mark the network for deletion
 	n.inDelete = true
-	if err = c.storeNetwork(context.TODO(), n); err != nil {
+	if err = n.ctrlr.storeNetwork(context.TODO(), n); err != nil {
 		return fmt.Errorf("error marking network %s (%s) for deletion: %v", n.name, n.id, err)
 	}
 
@@ -1071,13 +1067,13 @@ func (n *Network) delete(force bool, rmLBEndpoint bool) error {
 	}
 
 	// Cleanup the service discovery for this network
-	c.cleanupServiceDiscovery(n.id)
+	n.ctrlr.cleanupServiceDiscovery(n.id)
 
 	// Cleanup the load balancer. On Windows this call is required
 	// to remove remote loadbalancers in VFP, and must be performed before
 	// dataplane network deletion.
 	if runtime.GOOS == "windows" {
-		c.cleanupServiceBindings(n.id)
+		n.ctrlr.cleanupServiceBindings(n.id)
 	}
 
 	// Delete the network from the dataplane
@@ -1099,11 +1095,11 @@ removeFromStore:
 	// can't. The stored count is not maintained, so the downgraded version will
 	// always find it's zero (which is usually correct because the daemon had
 	// stopped), but older daemons fix it on startup anyway.
-	if err = c.deleteFromStore(&endpointCnt{n: n}); err != nil {
+	if err = n.ctrlr.deleteFromStore(&endpointCnt{n: n}); err != nil {
 		log.G(context.TODO()).Debugf("Error deleting endpoint count from store for stale network %s (%s) for deletion: %v", n.name, n.id, err)
 	}
 
-	if err = c.deleteStoredNetwork(n); err != nil {
+	if err = n.ctrlr.deleteStoredNetwork(n); err != nil {
 		return fmt.Errorf("error deleting network from store: %v", err)
 	}
 
@@ -1451,8 +1447,6 @@ func (n *Network) deleteSvcRecords(eID, name, serviceID string, epIPv4, epIPv6 n
 }
 
 func (n *Network) getController() *Controller {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	return n.ctrlr
 }
 
@@ -2111,10 +2105,6 @@ func (n *Network) createLoadBalancerSandbox() (retErr error) {
 }
 
 func (n *Network) deleteLoadBalancerSandbox() error {
-	n.mu.Lock()
-	c := n.ctrlr
-	n.mu.Unlock()
-
 	sandboxName := n.lbSandboxName()
 	endpointName := n.lbEndpointName()
 
@@ -2139,7 +2129,7 @@ func (n *Network) deleteLoadBalancerSandbox() error {
 		}
 	}
 
-	if err := c.SandboxDestroy(context.TODO(), sandboxName); err != nil {
+	if err := n.ctrlr.SandboxDestroy(context.TODO(), sandboxName); err != nil {
 		return fmt.Errorf("Failed to delete %s sandbox: %v", sandboxName, err)
 	}
 	return nil

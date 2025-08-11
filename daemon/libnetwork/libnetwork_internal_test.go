@@ -450,8 +450,6 @@ func TestUpdateSvcRecord(t *testing.T) {
 }
 
 func getSvcRecords(t *testing.T, n *Network, key string) (addrs []netip.Addr, found4, found6 bool) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	n.ctrlr.mu.Lock()
 	defer n.ctrlr.mu.Unlock()
 
