@@ -207,7 +207,6 @@ type Network struct {
 	scope           string // network data scope
 	dbIndex         uint64
 	dbExists        bool
-	drvOnce         *sync.Once
 	resolver        []*Resolver
 	inDelete        bool
 	driverTables    []networkDBTable
@@ -297,9 +296,8 @@ func (n *Network) New() datastore.KVObject {
 	defer n.mu.Unlock()
 
 	return &Network{
-		ctrlr:   n.ctrlr,
-		drvOnce: &sync.Once{},
-		scope:   n.scope,
+		ctrlr: n.ctrlr,
+		scope: n.scope,
 	}
 }
 
@@ -464,7 +462,6 @@ func (n *Network) CopyTo(o datastore.KVObject) error {
 	dstN.persist = n.persist
 	dstN.dbIndex = n.dbIndex
 	dstN.dbExists = n.dbExists
-	dstN.drvOnce = n.drvOnce
 	dstN.internal = n.internal
 	dstN.attachable = n.attachable
 	dstN.inDelete = n.inDelete

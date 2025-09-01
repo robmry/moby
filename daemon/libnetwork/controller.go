@@ -558,7 +558,6 @@ func (c *Controller) NewNetwork(ctx context.Context, networkType, name string, i
 		created:          time.Now(),
 		ctrlr:            c,
 		persist:          true,
-		drvOnce:          &sync.Once{},
 		loadBalancerMode: loadBalancerModeDefault,
 	}
 
