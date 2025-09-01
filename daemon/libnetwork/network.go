@@ -175,35 +175,27 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 // join using the Link method. A network is managed by a specific driver.
 type Network struct {
 	// These fields are immutable after network creation and do not require mutex protection
-	name         string
-	id           string
-	created      time.Time
-	complete     bool
-	networkType  string // networkType is the name of the netdriver used by this network
-	enableIPv4   bool
-	enableIPv6   bool
-	ctrlr        *Controller
-	labels       map[string]string
-	ipamType     string // ipamType is the name of the IPAM driver
-	ipamOptions  map[string]string
-	addrSpace    string
-	ipamV4Config []*IpamConf
-	ipamV6Config []*IpamConf
-	ipamV4Info   []*IpamInfo
-	ipamV6Info   []*IpamInfo
-
-	scope            string // network data scope
+	name             string
+	id               string
+	created          time.Time
+	complete         bool
+	networkType      string // networkType is the name of the netdriver used by this network
+	enableIPv4       bool
+	enableIPv6       bool
+	ctrlr            *Controller
+	labels           map[string]string
+	ipamType         string // ipamType is the name of the IPAM driver
+	ipamOptions      map[string]string
+	addrSpace        string
+	ipamV4Config     []*IpamConf
+	ipamV6Config     []*IpamConf
+	ipamV4Info       []*IpamInfo
+	ipamV6Info       []*IpamInfo
 	generic          options.Generic
-	dbIndex          uint64
-	dbExists         bool
 	persist          bool
-	drvOnce          *sync.Once
-	resolver         []*Resolver
 	internal         bool
 	attachable       bool
-	inDelete         bool
 	ingress          bool
-	driverTables     []networkDBTable
 	dynamic          bool
 	configOnly       bool
 	configFrom       string
@@ -211,8 +203,16 @@ type Network struct {
 	loadBalancerMode string
 	skipGwAllocIPv4  bool
 	skipGwAllocIPv6  bool
-	platformNetwork  //nolint:nolintlint,unused // only populated on windows
-	mu               sync.Mutex
+
+	scope           string // network data scope
+	dbIndex         uint64
+	dbExists        bool
+	drvOnce         *sync.Once
+	resolver        []*Resolver
+	inDelete        bool
+	driverTables    []networkDBTable
+	platformNetwork //nolint:nolintlint,unused // only populated on windows
+	mu              sync.Mutex
 }
 
 const (
@@ -248,8 +248,6 @@ func (n *Network) Resolvers() []*Resolver {
 }
 
 func (n *Network) Key() []string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	return []string{datastore.NetworkKeyPrefix, n.id}
 }
 
@@ -291,8 +289,6 @@ func (n *Network) Exists() bool {
 }
 
 func (n *Network) Skip() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	return !n.persist
 }
 
@@ -1726,8 +1722,6 @@ func (n *Network) Peers() []networkdb.PeerInfo {
 }
 
 func (n *Network) DriverOptions() map[string]string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
 	if n.generic != nil {
 		if m, ok := n.generic[netlabel.GenericData]; ok {
 			return m.(map[string]string)
@@ -1777,30 +1771,18 @@ func (n *Network) IpamInfo() (ipamV4Info []*IpamInfo, ipamV6Info []*IpamInfo) {
 }
 
 func (n *Network) Internal() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.internal
 }
 
 func (n *Network) Attachable() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.attachable
 }
 
 func (n *Network) Ingress() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.ingress
 }
 
 func (n *Network) Dynamic() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.dynamic
 }
 
@@ -1813,16 +1795,10 @@ func (n *Network) IPv6Enabled() bool {
 }
 
 func (n *Network) ConfigFrom() string {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.configFrom
 }
 
 func (n *Network) ConfigOnly() bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	return n.configOnly
 }
 
