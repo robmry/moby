@@ -203,13 +203,13 @@ type Network struct {
 	loadBalancerMode string
 	skipGwAllocIPv4  bool
 	skipGwAllocIPv6  bool
+	driverTables     []networkDBTable
 
 	scope           string // network data scope
 	dbIndex         uint64
 	dbExists        bool
 	resolver        []*Resolver
 	inDelete        bool
-	driverTables    []networkDBTable
 	platformNetwork //nolint:nolintlint,unused // only populated on windows
 	mu              sync.Mutex
 }
@@ -1806,6 +1806,9 @@ func (n *Network) Labels() map[string]string {
 func (n *Network) TableEventRegister(tableName string, objType driverapi.ObjectType) error {
 	if !driverapi.IsValidType(objType) {
 		return fmt.Errorf("invalid object type %v in registering table, %s", objType, tableName)
+	}
+	if n.complete {
+		return errors.New("event configuration cannot be modified after network construction")
 	}
 
 	t := networkDBTable{
