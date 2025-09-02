@@ -204,14 +204,14 @@ type Network struct {
 	skipGwAllocIPv4  bool
 	skipGwAllocIPv6  bool
 	driverTables     []networkDBTable
+	resolver         []*Resolver
+	platformNetwork  //nolint:nolintlint,unused // only populated on windows
 
-	scope           string // network data scope
-	dbIndex         uint64
-	dbExists        bool
-	resolver        []*Resolver
-	inDelete        bool
-	platformNetwork //nolint:nolintlint,unused // only populated on windows
-	mu              sync.Mutex
+	scope    string // network data scope
+	dbIndex  uint64
+	dbExists bool
+	inDelete bool
+	mu       sync.Mutex
 }
 
 const (

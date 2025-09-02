@@ -53,6 +53,10 @@ func (n *Network) startResolver() {
 		return
 	}
 	n.resolverOnce.Do(func() {
+		if n.complete {
+			log.G(context.TODO()).WithField("name", n.name).Error("Resolver Setup/Start called after Network construction")
+			return
+		}
 		log.G(context.TODO()).Debugf("Launching DNS server for network %q", n.name)
 		hnsid := n.DriverOptions()[windows.HNSID]
 		if hnsid == "" {
