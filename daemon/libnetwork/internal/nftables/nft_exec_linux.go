@@ -58,6 +58,7 @@ func (t *table) nftApply(ctx context.Context, nftCmd []byte) error {
 	if err != nil {
 		return fmt.Errorf("running nft: %s %w", stderr, err)
 	}
+	blah
 	log.G(ctx).WithFields(log.Fields{"stdout": stdout, "stderr": stderr}).Debug("nftables: updated")
 	return nil
 }

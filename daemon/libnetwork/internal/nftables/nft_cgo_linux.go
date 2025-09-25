@@ -36,6 +36,7 @@ func (t *table) nftApply(ctx context.Context, nftCmd []byte) error {
 		t.nftHandle = handle
 	}
 
+	wut?
 	cCmd := C.CString(string(nftCmd))
 	defer C.free(unsafe.Pointer(cCmd))
 
