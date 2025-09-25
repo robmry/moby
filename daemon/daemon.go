@@ -1400,6 +1400,8 @@ func NewDaemon(ctx context.Context, config *config.Config, pluginStore *plugin.S
 		"containerd-snapshotter": d.UsesSnapshotter(),
 	}).Info("Docker daemon")
 
+	log.G(ctx).Warn("XXXXXXXXXXXXXXXXXX hello! XXXXXXXXXXXXXXXXX")
+
 	return d, nil
 }
 
