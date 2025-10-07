@@ -17,7 +17,6 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/moby/moby/api/types/network"
-	"github.com/moby/moby/v2/daemon/internal/netipstringer"
 	"github.com/moby/moby/v2/daemon/internal/netiputil"
 	"github.com/moby/moby/v2/daemon/internal/stringid"
 	"github.com/moby/moby/v2/daemon/libnetwork/datastore"
@@ -1546,8 +1545,8 @@ func (n *Network) ipamAllocateVersion(ipam ipamapi.Ipam, v6 bool, ipamConf []*Ip
 
 		alloc, err := ipam.RequestPool(ipamapi.PoolRequest{
 			AddressSpace: n.addrSpace,
-			Pool:         netipstringer.Prefix(prefPool),
-			SubPool:      netipstringer.Prefix(cfg.SubPool),
+			Pool:         prefPool,
+			SubPool:      cfg.SubPool,
 			Options:      n.ipamOptions,
 			Exclude:      reserved,
 			V6:           v6,

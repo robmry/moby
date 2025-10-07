@@ -70,14 +70,14 @@ type PoolRequest struct {
 	// the IPAM driver can interpret it. Each driver might support a different
 	// set of AddressSpace.
 	AddressSpace string
-	// Pool is a prefix in CIDR notation. It's non-mandatory. When specified
-	// the Pool will be statically allocated. The Pool is used for dynamic
-	// address allocation -- except when SubPool is specified.
-	Pool string
-	// SubPool is a subnet from Pool, in CIDR notation too. It's non-mandatory.
-	// When specified, it represents the subnet where addresses will be
-	// dynamically allocated. It can't be specified if Pool isn't specified.
-	SubPool string
+	// Pool is a prefix. It's non-mandatory. When specified, the Pool will be
+	// statically allocated. The Pool is used for dynamic address allocation --
+	// except when SubPool is specified.
+	Pool netip.Prefix
+	// SubPool is a subnet from Pool. It's non-mandatory. When specified, it
+	// represents the subnet where addresses will be dynamically allocated. It can't
+	// be specified if Pool isn't specified.
+	SubPool netip.Prefix
 	// Options is a map of opaque k/v passed to the driver. It's non-mandatory.
 	// Drivers are free to ignore it.
 	Options map[string]string

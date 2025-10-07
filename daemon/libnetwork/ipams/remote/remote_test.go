@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -262,7 +263,7 @@ func TestRemoteDriver(t *testing.T) {
 	// Request specific pool
 	alloc, err = d.RequestPool(ipamapi.PoolRequest{
 		AddressSpace: "white",
-		Pool:         "172.20.0.0/16",
+		Pool:         netip.MustParsePrefix("172.20.0.0/16"),
 	})
 	assert.NilError(t, err)
 	assert.Check(t, is.Equal(alloc.PoolID, "white/172.20.0.0/16"))
@@ -272,8 +273,8 @@ func TestRemoteDriver(t *testing.T) {
 	// Request specific pool and subpool
 	alloc, err = d.RequestPool(ipamapi.PoolRequest{
 		AddressSpace: "white",
-		Pool:         "172.20.0.0/16",
-		SubPool:      "172.20.3.0/24",
+		Pool:         netip.MustParsePrefix("172.20.0.0/16"),
+		SubPool:      netip.MustParsePrefix("172.20.3.0/24"),
 		Options:      map[string]string{"culo": "yes"},
 	})
 	assert.NilError(t, err)

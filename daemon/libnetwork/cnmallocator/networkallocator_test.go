@@ -3,7 +3,6 @@ package cnmallocator
 import (
 	"fmt"
 	"net"
-	"net/netip"
 	"testing"
 
 	"github.com/moby/moby/v2/daemon/libnetwork/ipamapi"
@@ -730,11 +729,9 @@ func (a *mockIpam) GetDefaultAddressSpaces() (string, string, error) {
 
 func (a *mockIpam) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool, error) {
 	a.actualIpamOptions = req.Options
-
-	poolCidr := netip.MustParsePrefix(req.Pool)
 	return ipamapi.AllocatedPool{
 		PoolID: fmt.Sprintf("defaultAS/%s", req.Pool),
-		Pool:   poolCidr,
+		Pool:   req.Pool,
 	}, nil
 }
 

@@ -36,10 +36,10 @@ func (a *allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 	if req.AddressSpace != defaultAddressSpace {
 		return ipamapi.AllocatedPool{}, types.InvalidParameterErrorf("unknown address space: %s", req.AddressSpace)
 	}
-	if req.Pool != "" {
+	if req.Pool.IsValid() {
 		return ipamapi.AllocatedPool{}, types.InvalidParameterErrorf("null ipam driver does not handle specific address pool requests")
 	}
-	if req.SubPool != "" {
+	if req.SubPool.IsValid() {
 		return ipamapi.AllocatedPool{}, types.InvalidParameterErrorf("null ipam driver does not handle specific address subpool requests")
 	}
 	if req.V6 {

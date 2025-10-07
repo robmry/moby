@@ -1,6 +1,7 @@
 package null
 
 import (
+	"net/netip"
 	"testing"
 
 	"github.com/moby/moby/v2/daemon/libnetwork/ipamapi"
@@ -24,10 +25,10 @@ func TestPoolRequest(t *testing.T) {
 	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: "default"})
 	assert.ErrorContains(t, err, "unknown address space: default")
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: defaultAddressSpace, Pool: "192.168.0.0/16"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: defaultAddressSpace, Pool: netip.MustParsePrefix("192.168.0.0/16")})
 	assert.ErrorContains(t, err, "null ipam driver does not handle specific address pool requests")
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: defaultAddressSpace, SubPool: "192.168.0.0/24"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: defaultAddressSpace, SubPool: netip.MustParsePrefix("192.168.0.0/24")})
 	assert.ErrorContains(t, err, "null ipam driver does not handle specific address subpool requests")
 }
 

@@ -39,7 +39,7 @@ func newTestContext(t *testing.T, mask int, options map[string]string) *testCont
 	if err != nil {
 		t.Fatal(err)
 	}
-	network := fmt.Sprintf("192.168.100.0/%d", mask)
+	network := netip.MustParsePrefix(fmt.Sprintf("192.168.100.0/%d", mask))
 	// total ips 2^(32-mask) - 2 (network and broadcast)
 	totalIps := 1<<uint(32-mask) - 2
 

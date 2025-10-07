@@ -134,27 +134,20 @@ func (a *Allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 	if err != nil {
 		return ipamapi.AllocatedPool{}, err
 	}
-	if req.Pool == "" && req.SubPool != "" {
+	if !req.Pool.IsValid() && req.SubPool.IsValid() {
 		return ipamapi.AllocatedPool{}, parseErr(ipamapi.ErrInvalidSubPool)
 	}
 
 	k := PoolID{AddressSpace: req.AddressSpace}
-	if req.Pool == "" {
+	if !req.Pool.IsValid() {
 		if k.Subnet, err = aSpace.allocatePredefinedPool(req.Exclude); err != nil {
 			return ipamapi.AllocatedPool{}, err
 		}
 		return ipamapi.AllocatedPool{PoolID: k.String(), Pool: k.Subnet}, nil
 	}
 
-	if k.Subnet, err = netip.ParsePrefix(req.Pool); err != nil {
-		return ipamapi.AllocatedPool{}, parseErr(ipamapi.ErrInvalidPool)
-	}
-
-	if req.SubPool != "" {
-		if k.ChildSubnet, err = netip.ParsePrefix(req.SubPool); err != nil {
-			return ipamapi.AllocatedPool{}, types.InternalErrorf("invalid pool request: %v", ipamapi.ErrInvalidSubPool)
-		}
-	}
+	k.Subnet = req.Pool
+	k.ChildSubnet = req.SubPool
 
 	// This is a new non-master pool (subPool)
 	if k.Subnet.IsValid() && k.ChildSubnet.IsValid() && k.Subnet.Addr().BitLen() != k.ChildSubnet.Addr().BitLen() {

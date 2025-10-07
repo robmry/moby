@@ -60,12 +60,12 @@ func TestAddSubnets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	alloc1, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8"})
+	alloc1, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	if err != nil {
 		t.Fatal("Unexpected failure in adding subnet")
 	}
 
-	alloc2, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: "10.0.0.0/8"})
+	alloc2, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	if err != nil {
 		t.Fatalf("Unexpected failure in adding overlapping subnets to different address spaces: %v", err)
 	}
@@ -74,41 +74,41 @@ func TestAddSubnets(t *testing.T) {
 		t.Fatal("returned same pool id for same subnets in different namespaces")
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: "10.0.0.0/8"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	if err == nil {
 		t.Fatalf("Expected failure requesting existing subnet")
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: "10.128.0.0/9"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("10.128.0.0/9")})
 	if err == nil {
 		t.Fatal("Expected failure on adding overlapping base subnet")
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: "10.0.0.0/8", SubPool: "10.128.0.0/9"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8"), SubPool: netip.MustParsePrefix("10.128.0.0/9")})
 	if err != nil {
 		t.Fatalf("Unexpected failure on adding sub pool: %v", err)
 	}
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: "10.0.0.0/8", SubPool: "10.128.0.0/9"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8"), SubPool: netip.MustParsePrefix("10.128.0.0/9")})
 	if err == nil {
 		t.Fatalf("Expected failure on adding overlapping sub pool")
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.20.2.0/24"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.20.2.0/24")})
 	if err == nil {
 		t.Fatal("Failed to detect overlapping subnets")
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.128.0.0/9"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.128.0.0/9")})
 	if err == nil {
 		t.Fatal("Failed to detect overlapping subnets")
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "1003:1:2:3:4:5:6::/112"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("1003:1:2:3:4:5:6::/112")})
 	if err != nil {
 		t.Fatalf("Failed to add v6 subnet: %s", err.Error())
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "1003:1:2:3::/64"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("1003:1:2:3::/64")})
 	if err == nil {
 		t.Fatal("Failed to detect overlapping v6 subnet")
 	}
@@ -120,7 +120,7 @@ func TestDoublePoolRelease(t *testing.T) {
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
 	assert.NilError(t, err)
 
-	alloc1, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8"})
+	alloc1, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	assert.NilError(t, err)
 
 	err = a.ReleasePool(alloc1.PoolID)
@@ -139,7 +139,7 @@ func TestAddReleasePoolID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	alloc1, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8"})
+	alloc1, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	if err != nil {
 		t.Fatalf("Unexpected failure in adding pool: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestAddReleasePoolID(t *testing.T) {
 		t.Errorf("Unexpected autoRelease value for %s: %v", k0, got)
 	}
 
-	alloc2, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8", SubPool: "10.0.0.0/16"})
+	alloc2, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8"), SubPool: netip.MustParsePrefix("10.0.0.0/16")})
 	if err != nil {
 		t.Fatalf("Unexpected failure in adding sub pool: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestAddReleasePoolID(t *testing.T) {
 		t.Errorf("Unexpected autoRelease value for %s: %v", k1, got)
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8", SubPool: "10.0.0.0/16"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8"), SubPool: netip.MustParsePrefix("10.0.0.0/16")})
 	if err == nil {
 		t.Fatalf("Expected failure in adding sub pool: %v", err)
 	}
@@ -213,7 +213,7 @@ func TestAddReleasePoolID(t *testing.T) {
 		t.Error("Pool should have been deleted when released")
 	}
 
-	alloc10, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8"})
+	alloc10, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	if err != nil {
 		t.Errorf("Unexpected failure in adding pool: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestAddReleasePoolID(t *testing.T) {
 		t.Errorf("Base pool %s is still present: %v", k0, bp)
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")})
 	if err != nil {
 		t.Errorf("Unexpected failure in adding pool: %v", err)
 	}
@@ -290,14 +290,14 @@ func TestRemoveSubnet(t *testing.T) {
 	assert.NilError(t, err)
 
 	reqs := []ipamapi.PoolRequest{
-		{AddressSpace: localAddressSpace, Pool: "192.168.0.0/16"},
-		{AddressSpace: localAddressSpace, Pool: "172.17.0.0/16"},
-		{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8"},
-		{AddressSpace: localAddressSpace, Pool: "2001:db8:1:2:3:4:ffff::/112", V6: true},
-		{AddressSpace: globalAddressSpace, Pool: "172.17.0.0/16"},
-		{AddressSpace: globalAddressSpace, Pool: "10.0.0.0/8"},
-		{AddressSpace: globalAddressSpace, Pool: "2001:db8:1:2:3:4:5::/112", V6: true},
-		{AddressSpace: globalAddressSpace, Pool: "2001:db8:1:2:3:4:ffff::/112", V6: true},
+		{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("192.168.0.0/16")},
+		{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("172.17.0.0/16")},
+		{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")},
+		{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("2001:db8:1:2:3:4:ffff::/112"), V6: true},
+		{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("172.17.0.0/16")},
+		{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8")},
+		{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("2001:db8:1:2:3:4:5::/112"), V6: true},
+		{AddressSpace: globalAddressSpace, Pool: netip.MustParsePrefix("2001:db8:1:2:3:4:ffff::/112"), V6: true},
 	}
 	allocs := make([]ipamapi.AllocatedPool, 0, len(reqs))
 
@@ -320,7 +320,7 @@ func TestGetSameAddress(t *testing.T) {
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
 	assert.NilError(t, err)
 
-	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "192.168.100.0/24"})
+	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("192.168.100.0/24")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,29 +345,29 @@ func TestRequestFromSamePool(t *testing.T) {
 
 	_, err = a.RequestPool(ipamapi.PoolRequest{
 		AddressSpace: localAddressSpace,
-		Pool:         "10.0.0.0/8",
-		SubPool:      "10.10.0.0/16",
+		Pool:         netip.MustParsePrefix("10.0.0.0/8"),
+		SubPool:      netip.MustParsePrefix("10.10.0.0/16"),
 	})
 	assert.NilError(t, err)
 
 	_, err = a.RequestPool(ipamapi.PoolRequest{
 		AddressSpace: localAddressSpace,
-		Pool:         "10.0.0.0/8",
-		SubPool:      "10.10.0.0/16",
+		Pool:         netip.MustParsePrefix("10.0.0.0/8"),
+		SubPool:      netip.MustParsePrefix("10.10.0.0/16"),
 	})
 	assert.ErrorContains(t, err, "invalid pool request")
 
 	_, err = a.RequestPool(ipamapi.PoolRequest{
 		AddressSpace: localAddressSpace,
-		Pool:         "10.0.0.0/8",
-		SubPool:      "10.10.0.0/17",
+		Pool:         netip.MustParsePrefix("10.0.0.0/8"),
+		SubPool:      netip.MustParsePrefix("10.10.0.0/17"),
 	})
 	assert.NilError(t, err)
 
 	_, err = a.RequestPool(ipamapi.PoolRequest{
 		AddressSpace: localAddressSpace,
-		Pool:         "10.0.0.0/8",
-		SubPool:      "10.11.0.0/16",
+		Pool:         netip.MustParsePrefix("10.0.0.0/8"),
+		SubPool:      netip.MustParsePrefix("10.11.0.0/16"),
 	})
 	assert.NilError(t, err)
 }
@@ -377,7 +377,7 @@ func TestGetAddressSubPoolEqualPool(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Requesting a subpool of same size of the master pool should not cause any problem on ip allocation
-	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "172.18.0.0/16", SubPool: "172.18.0.0/16"})
+	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("172.18.0.0/16"), SubPool: netip.MustParsePrefix("172.18.0.0/16")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestRequestReleaseAddressFromSubPool(t *testing.T) {
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
 	assert.NilError(t, err)
 
-	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "172.28.0.0/16", SubPool: "172.28.30.0/24"})
+	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("172.28.0.0/16"), SubPool: netip.MustParsePrefix("172.28.30.0/24")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,11 +422,11 @@ func TestRequestReleaseAddressFromSubPool(t *testing.T) {
 		t.Fatalf("Unexpected IP from subpool. Expected: %s. Got: %v.", rp, ip)
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8", SubPool: "10.0.0.0/16"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8"), SubPool: netip.MustParsePrefix("10.0.0.0/16")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/16", SubPool: "10.0.0.0/24"})
+	alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/16"), SubPool: netip.MustParsePrefix("10.0.0.0/24")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,7 +459,7 @@ func TestRequestReleaseAddressFromSubPool(t *testing.T) {
 	dueExp, _ := types.ParseCIDR("10.2.2.2/16")
 	treExp, _ := types.ParseCIDR("10.2.2.1/16")
 
-	if alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.2.0.0/16", SubPool: "10.2.2.0/24"}); err != nil {
+	if alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.2.0.0/16"), SubPool: netip.MustParsePrefix("10.2.2.0/24")}); err != nil {
 		t.Fatal(err)
 	}
 	tre, _, err := a.RequestAddress(alloc.PoolID, treExp.IP, nil)
@@ -516,7 +516,7 @@ func TestSerializeRequestReleaseAddressFromSubPool(t *testing.T) {
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
 	assert.NilError(t, err)
 
-	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "172.28.0.0/16", SubPool: "172.28.30.0/24"})
+	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("172.28.0.0/16"), SubPool: netip.MustParsePrefix("172.28.30.0/24")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,11 +546,11 @@ func TestSerializeRequestReleaseAddressFromSubPool(t *testing.T) {
 		t.Fatalf("Unexpected IP from subpool. Expected: %s. Got: %v.", rp, ip)
 	}
 
-	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/8", SubPool: "10.0.0.0/16"})
+	_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/8"), SubPool: netip.MustParsePrefix("10.0.0.0/16")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.0.0.0/16", SubPool: "10.0.0.0/24"})
+	alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.0.0.0/16"), SubPool: netip.MustParsePrefix("10.0.0.0/24")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +584,7 @@ func TestSerializeRequestReleaseAddressFromSubPool(t *testing.T) {
 	treExp, _ := types.ParseCIDR("10.2.2.1/16")
 	quaExp, _ := types.ParseCIDR("10.2.2.3/16")
 	fivExp, _ := types.ParseCIDR("10.2.2.4/16")
-	if alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "10.2.0.0/16", SubPool: "10.2.2.0/24"}); err != nil {
+	if alloc, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("10.2.0.0/16"), SubPool: netip.MustParsePrefix("10.2.2.0/24")}); err != nil {
 		t.Fatal(err)
 	}
 	tre, _, err := a.RequestAddress(alloc.PoolID, treExp.IP, opts)
@@ -649,8 +649,8 @@ func TestGetAddress(t *testing.T) {
 
 func TestRequestSyntaxCheck(t *testing.T) {
 	var (
-		pool    = "192.168.0.0/16"
-		subPool = "192.168.0.0/24"
+		pool    = netip.MustParsePrefix("192.168.0.0/16")
+		subPool = netip.MustParsePrefix("192.168.0.0/24")
 	)
 
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
@@ -737,7 +737,7 @@ func TestRequest(t *testing.T) {
 	}
 
 	for _, d := range input {
-		assertNRequests(t, d.subnet, d.numReq, d.lastIP)
+		assertNRequests(t, netip.MustParsePrefix(d.subnet), d.numReq, d.lastIP)
 	}
 }
 
@@ -804,12 +804,12 @@ func TestOverlappingRequests(t *testing.T) {
 
 		// Set up some existing allocations.  This should always succeed.
 		for _, env := range tc.environment {
-			_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: env})
+			_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix(env)})
 			assert.NilError(t, err)
 		}
 
 		// Make the test allocation.
-		_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: tc.subnet})
+		_, err = a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix(tc.subnet)})
 		if tc.ok {
 			assert.NilError(t, err)
 		} else {
@@ -819,7 +819,7 @@ func TestOverlappingRequests(t *testing.T) {
 }
 
 func TestUnusualSubnets(t *testing.T) {
-	subnet := "192.168.0.2/31"
+	subnet := netip.MustParsePrefix("192.168.0.2/31")
 
 	outsideTheRangeAddresses := []struct {
 		address string
@@ -880,7 +880,7 @@ func TestUnusualSubnets(t *testing.T) {
 }
 
 func TestRelease(t *testing.T) {
-	subnet := "192.168.0.0/23"
+	subnet := netip.MustParsePrefix("192.168.0.0/23")
 
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
 	assert.NilError(t, err)
@@ -964,7 +964,7 @@ func assertGetAddress(t *testing.T, subnet string) {
 	*/
 }
 
-func assertNRequests(t *testing.T, subnet string, numReq int, lastExpectedIP string) {
+func assertNRequests(t *testing.T, subnet netip.Prefix, numReq int, lastExpectedIP string) {
 	var (
 		nw        *net.IPNet
 		printTime = false
@@ -996,7 +996,7 @@ func assertNRequests(t *testing.T, subnet string, numReq int, lastExpectedIP str
 	}
 }
 
-func benchmarkRequest(b *testing.B, a *Allocator, subnet string) {
+func benchmarkRequest(b *testing.B, a *Allocator, subnet netip.Prefix) {
 	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: subnet})
 	for !errors.Is(err, ipamapi.ErrNoAvailableIPs) {
 		_, _, err = a.RequestAddress(alloc.PoolID, nil, nil)
@@ -1014,19 +1014,19 @@ func BenchmarkRequest(b *testing.B) {
 		name := fmt.Sprintf("%vSubnet", subnet)
 		b.Run(name, func(b *testing.B) {
 			a, _ := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
-			benchmarkRequest(b, a, subnet)
+			benchmarkRequest(b, a, netip.MustParsePrefix(subnet))
 		})
 	}
 }
 
 func TestAllocateRandomDeallocate(t *testing.T) {
 	for _, store := range []bool{false, true} {
-		testAllocateRandomDeallocate(t, "172.25.0.0/16", "", 384, store)
-		testAllocateRandomDeallocate(t, "172.25.0.0/16", "172.25.252.0/22", 384, store)
+		testAllocateRandomDeallocate(t, netip.MustParsePrefix("172.25.0.0/16"), netip.Prefix{}, 384, store)
+		testAllocateRandomDeallocate(t, netip.MustParsePrefix("172.25.0.0/16"), netip.MustParsePrefix("172.25.252.0/22"), 384, store)
 	}
 }
 
-func testAllocateRandomDeallocate(t *testing.T, pool, subPool string, num int, store bool) {
+func testAllocateRandomDeallocate(t *testing.T, pool, subPool netip.Prefix, num int, store bool) {
 	a, err := NewAllocator(ipamutils.GetLocalScopeDefaultNetworks(), ipamutils.GetGlobalScopeDefaultNetworks())
 	if err != nil {
 		t.Fatal(err)
@@ -1170,7 +1170,7 @@ func TestRequestReleaseAddressDuplicate(t *testing.T) {
 	}
 	var l sync.Mutex
 
-	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: "198.168.0.0/23"})
+	alloc, err := a.RequestPool(ipamapi.PoolRequest{AddressSpace: localAddressSpace, Pool: netip.MustParsePrefix("198.168.0.0/23")})
 	if err != nil {
 		t.Fatal(err)
 	}

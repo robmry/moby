@@ -903,10 +903,12 @@ func (na *cnmNetworkAllocator) allocatePools(n *api.Network) (map[netip.Prefix]s
 	}
 
 	for i, ic := range ipamConfigs {
+		pool, _ := netip.ParsePrefix(ic.Subnet)
+		subPool, _ := netip.ParsePrefix(ic.Range)
 		alloc, err := ipam.RequestPool(ipamapi.PoolRequest{
 			AddressSpace: asName,
-			Pool:         ic.Subnet,
-			SubPool:      ic.Range,
+			Pool:         pool,
+			SubPool:      subPool,
 			Options:      dOptions,
 		})
 		if err != nil {

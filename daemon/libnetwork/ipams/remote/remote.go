@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/netip"
 
+	"github.com/moby/moby/v2/daemon/internal/netipstringer"
+
 	"github.com/containerd/log"
 	"github.com/moby/moby/v2/daemon/libnetwork/ipamapi"
 	"github.com/moby/moby/v2/daemon/libnetwork/ipams/remote/api"
@@ -138,8 +140,8 @@ func (a *allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 
 	remoteReq := &api.RequestPoolRequest{
 		AddressSpace: req.AddressSpace,
-		Pool:         req.Pool,
-		SubPool:      req.SubPool,
+		Pool:         netipstringer.Prefix(req.Pool),
+		SubPool:      netipstringer.Prefix(req.SubPool),
 		Options:      req.Options,
 		V6:           req.V6,
 	}
@@ -167,7 +169,7 @@ func (a *allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 		// instead would likely have avoided that as well, so we can only guess.
 		//
 		// [1]: https://github.com/moby/libnetwork/commit/5ca79d6b87873264516323a7b76f0af7d0298492#diff-bdcd879439d041827d334846f9aba01de6e3683ed8fdd01e63917dae6df23846
-		if req.Pool != "" || req.AddressSpace == globalSpace || alloc.Pool.String() == "0.0.0.0/0" {
+		if req.Pool.IsValid() || req.AddressSpace == globalSpace || alloc.Pool.String() == "0.0.0.0/0" {
 			return alloc, nil
 		}
 
