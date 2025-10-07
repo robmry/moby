@@ -20,7 +20,6 @@ import (
 	"github.com/moby/moby/v2/daemon/config"
 	"github.com/moby/moby/v2/daemon/container"
 	"github.com/moby/moby/v2/daemon/internal/multierror"
-	"github.com/moby/moby/v2/daemon/internal/netipstringer"
 	"github.com/moby/moby/v2/daemon/internal/netiputil"
 	"github.com/moby/moby/v2/daemon/internal/otelutil"
 	"github.com/moby/moby/v2/daemon/libnetwork"
@@ -538,11 +537,11 @@ func getIpamConfig(data []networktypes.IPAMConfig) ([]*libnetwork.IpamConf, []*l
 	ipamV6Cfg := []*libnetwork.IpamConf{}
 	for _, d := range data {
 		iCfg := libnetwork.IpamConf{
-			PreferredPool: netipstringer.Prefix(netiputil.Unmap(d.Subnet).Masked()),
-			SubPool:       netipstringer.Prefix(netiputil.Unmap(d.IPRange).Masked()),
-			Gateway:       netipstringer.Addr(d.Gateway.Unmap()),
-			AuxAddresses: maps.Collect(iterutil.Map2(maps.All(d.AuxAddress), func(k string, v netip.Addr) (string, string) {
-				return k, v.Unmap().String()
+			PreferredPool: netiputil.Unmap(d.Subnet).Masked(),
+			SubPool:       netiputil.Unmap(d.IPRange).Masked(),
+			Gateway:       d.Gateway.Unmap(),
+			AuxAddresses: maps.Collect(iterutil.Map2(maps.All(d.AuxAddress), func(k string, v netip.Addr) (string, netip.Addr) {
+				return k, v.Unmap()
 			})),
 		}
 		if d.Subnet.Addr().Unmap().Is4() {
@@ -815,7 +814,7 @@ func buildIPAMResources(nw *libnetwork.Network) networktypes.IPAM {
 
 	hasIPv4Config := false
 	for _, cfg := range ipv4Conf {
-		if cfg.PreferredPool == "" {
+		if !cfg.PreferredPool.IsValid() {
 			continue
 		}
 		hasIPv4Config = true
@@ -824,7 +823,7 @@ func buildIPAMResources(nw *libnetwork.Network) networktypes.IPAM {
 
 	hasIPv6Config := false
 	for _, cfg := range ipv6Conf {
-		if cfg.PreferredPool == "" {
+		if !cfg.PreferredPool.IsValid() {
 			continue
 		}
 		hasIPv6Config = true

@@ -4,6 +4,7 @@ package libnetwork
 
 import (
 	"context"
+	"net/netip"
 	"strconv"
 	"testing"
 
@@ -122,7 +123,8 @@ func TestSandboxAddMultiPrio(t *testing.T) {
 		{
 			NetworkOptionEnableIPv4(true),
 			NetworkOptionEnableIPv6(true),
-			NetworkOptionIpam(defaultipam.DriverName, "", nil, []*IpamConf{{PreferredPool: "fe90::/64"}}, nil),
+			NetworkOptionIpam(defaultipam.DriverName, "", nil,
+				[]*IpamConf{{PreferredPool: netip.MustParsePrefix("fe90::/64")}}, nil),
 		},
 		{
 			NetworkOptionEnableIPv4(true),
@@ -219,7 +221,8 @@ func TestSandboxAddSamePrio(t *testing.T) {
 		{
 			NetworkOptionEnableIPv4(true),
 			NetworkOptionEnableIPv6(true),
-			NetworkOptionIpam(defaultipam.DriverName, "", nil, []*IpamConf{{PreferredPool: "fe90::/64"}}, nil),
+			NetworkOptionIpam(defaultipam.DriverName, "", nil,
+				[]*IpamConf{{PreferredPool: netip.MustParsePrefix("fe90::/64")}}, nil),
 		},
 		{
 			NetworkOptionEnableIPv4(true),

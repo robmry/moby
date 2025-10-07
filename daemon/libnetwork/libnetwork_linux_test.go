@@ -254,8 +254,16 @@ func TestNetworkConfig(t *testing.T) {
 			bridge.EnableICC: "false",
 		},
 	}
-	ipamV4ConfList := []*libnetwork.IpamConf{{PreferredPool: "192.168.100.0/24", SubPool: "192.168.100.128/25", Gateway: "192.168.100.1"}}
-	ipamV6ConfList := []*libnetwork.IpamConf{{PreferredPool: "2001:db8:abcd::/64", SubPool: "2001:db8:abcd::ef99/80", Gateway: "2001:db8:abcd::22"}}
+	ipamV4ConfList := []*libnetwork.IpamConf{{
+		PreferredPool: netip.MustParsePrefix("192.168.100.0/24"),
+		SubPool:       netip.MustParsePrefix("192.168.100.128/25"),
+		Gateway:       netip.MustParseAddr("192.168.100.1"),
+	}}
+	ipamV6ConfList := []*libnetwork.IpamConf{{
+		PreferredPool: netip.MustParsePrefix("2001:db8:abcd::/64"),
+		SubPool:       netip.MustParsePrefix("2001:db8:abcd::ef99/80"),
+		Gateway:       netip.MustParseAddr("2001:db8:abcd::22"),
+	}}
 
 	netOptions := []libnetwork.NetworkOption{
 		libnetwork.NetworkOptionConfigOnly(),
@@ -364,7 +372,7 @@ func TestUnknownEndpoint(t *testing.T) {
 			bridge.BridgeName: "testnetwork",
 		},
 	}
-	ipamV4ConfList := []*libnetwork.IpamConf{{PreferredPool: "192.168.100.0/24"}}
+	ipamV4ConfList := []*libnetwork.IpamConf{{PreferredPool: netip.MustParsePrefix("192.168.100.0/24")}}
 
 	network, err := createTestNetwork(controller, bridgeNetType, "testnetwork", option, ipamV4ConfList, nil)
 	assert.NilError(t, err)
@@ -960,7 +968,7 @@ func makeTestIPv6Network(t *testing.T, c *libnetwork.Controller) *libnetwork.Net
 		},
 	}
 	ipamV6ConfList := []*libnetwork.IpamConf{
-		{PreferredPool: "fd81:fb6e:38ba:abcd::/64", Gateway: "fd81:fb6e:38ba:abcd::9"},
+		{PreferredPool: netip.MustParsePrefix("fd81:fb6e:38ba:abcd::/64"), Gateway: netip.MustParseAddr("fd81:fb6e:38ba:abcd::9")},
 	}
 	n, err := createTestNetwork(c,
 		"bridge",
@@ -1076,7 +1084,7 @@ func TestEndpointJoin(t *testing.T) {
 			bridge.EnableIPMasquerade: "true",
 		},
 	}
-	ipamV6ConfList := []*libnetwork.IpamConf{{PreferredPool: "fe90::/64", Gateway: "fe90::22"}}
+	ipamV6ConfList := []*libnetwork.IpamConf{{PreferredPool: netip.MustParsePrefix("fe90::/64"), Gateway: netip.MustParseAddr("fe90::22")}}
 	n1, err := controller.NewNetwork(context.Background(), bridgeNetType, "testnetwork1", "",
 		libnetwork.NetworkOptionGeneric(netOption),
 		libnetwork.NetworkOptionEnableIPv4(true),
@@ -1522,8 +1530,8 @@ func TestBridge(t *testing.T) {
 			bridge.EnableIPMasquerade: "true",
 		},
 	}
-	ipamV4ConfList := []*libnetwork.IpamConf{{PreferredPool: "192.168.100.0/24", Gateway: "192.168.100.1"}}
-	ipamV6ConfList := []*libnetwork.IpamConf{{PreferredPool: "fe90::/64", Gateway: "fe90::22"}}
+	ipamV4ConfList := []*libnetwork.IpamConf{{PreferredPool: netip.MustParsePrefix("192.168.100.0/24"), Gateway: netip.MustParseAddr("192.168.100.1")}}
+	ipamV6ConfList := []*libnetwork.IpamConf{{PreferredPool: netip.MustParsePrefix("fe90::/64"), Gateway: netip.MustParseAddr("fe90::22")}}
 
 	network, err := createTestNetwork(controller, bridgeNetType, "testnetwork", netOption, ipamV4ConfList, ipamV6ConfList)
 	assert.NilError(t, err)

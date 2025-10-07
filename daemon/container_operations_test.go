@@ -73,10 +73,10 @@ func TestEndpointIPAMConfigWithOutOfRangeAddrs(t *testing.T) {
 				LinkLocalIPs: []netip.Addr{netip.MustParseAddr("169.254.169.254"), netip.MustParseAddr("fe80::42:a8ff:fe33:6230")},
 			},
 			v4Subnets: []*libnetwork.IpamConf{
-				{PreferredPool: "192.168.100.0/24"},
+				{PreferredPool: netip.MustParsePrefix("192.168.100.0/24")},
 			},
 			v6Subnets: []*libnetwork.IpamConf{
-				{PreferredPool: "2a01:d2:af:420b:25c1:1816:bb33::/112"},
+				{PreferredPool: netip.MustParsePrefix("2a01:d2:af:420b:25c1:1816:bb33::/112")},
 			},
 		},
 		{
@@ -86,10 +86,10 @@ func TestEndpointIPAMConfigWithOutOfRangeAddrs(t *testing.T) {
 				IPv6Address: netip.MustParseAddr("2a01:d2:af:420b:25c1:1816:bb33:855c"),
 			},
 			v4Subnets: []*libnetwork.IpamConf{
-				{PreferredPool: "192.168.255.0/24"},
+				{PreferredPool: netip.MustParsePrefix("192.168.255.0/24")},
 			},
 			v6Subnets: []*libnetwork.IpamConf{
-				{PreferredPool: "2001:db8::/112"},
+				{PreferredPool: netip.MustParsePrefix("2001:db8::/112")},
 			},
 			expectedErrors: []string{
 				"no configured subnet or ip-range contain the IP address 192.168.100.10",

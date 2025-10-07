@@ -28,6 +28,7 @@ import (
 	"github.com/moby/moby/v2/daemon/config"
 	"github.com/moby/moby/v2/daemon/container"
 	"github.com/moby/moby/v2/daemon/initlayer"
+	"github.com/moby/moby/v2/daemon/internal/netiputil"
 	"github.com/moby/moby/v2/daemon/internal/otelutil"
 	"github.com/moby/moby/v2/daemon/internal/usergroup"
 	"github.com/moby/moby/v2/daemon/libnetwork"
@@ -1091,19 +1092,19 @@ func getDefaultBridgeIPAMConf(
 		}
 	}
 
-	ipamConf := &libnetwork.IpamConf{AuxAddresses: make(map[string]string)}
+	ipamConf := &libnetwork.IpamConf{AuxAddresses: make(map[string]netip.Addr)}
 	if bIP != nil {
-		ipamConf.PreferredPool = bIPNet.String()
-		ipamConf.Gateway = bIP.String()
-	} else if !userManagedBridge && ipamConf.PreferredPool != "" {
+		ipamConf.PreferredPool, _ = netiputil.ToPrefix(bIPNet)
+		ipamConf.Gateway, _ = netip.AddrFromSlice(bIP)
+	} else if !userManagedBridge && ipamConf.PreferredPool.IsValid() {
 		_, bipOptName := opts.bip()
 		log.G(context.TODO()).Infof("Default bridge (%s) is assigned with an IP address %s. Daemon option --"+bipOptName+" can be used to set a preferred IP address", bridgeName, ipamConf.PreferredPool)
 	}
 
 	if fCidrIP != nil && fCidrIPNet != nil {
-		ipamConf.SubPool = fCidrIPNet.String()
-		if ipamConf.PreferredPool == "" {
-			ipamConf.PreferredPool = fCidrIPNet.String()
+		ipamConf.SubPool, _ = netiputil.ToPrefix(fCidrIPNet)
+		if !ipamConf.PreferredPool.IsValid() {
+			ipamConf.PreferredPool, _ = netiputil.ToPrefix(fCidrIPNet)
 		} else if userManagedBridge && bIPNet != nil {
 			fCidrOnes, _ := fCidrIPNet.Mask.Size()
 			bIPOnes, _ := bIPNet.Mask.Size()
@@ -1125,13 +1126,13 @@ func getDefaultBridgeIPAMConf(
 					fixedCIDROpt:     fixedCIDR,
 					"bridge-network": bIPNet.String(),
 				}).Warn(fixedCIDROpt + " is outside any subnet implied by addresses on the user-managed default bridge, this may be treated as an error in a future release")
-				ipamConf.SubPool = ""
+				ipamConf.SubPool = netip.Prefix{}
 			}
 		}
 	}
 
 	if defGw, _, auxAddrLabel := opts.defGw(); defGw != nil {
-		ipamConf.AuxAddresses[auxAddrLabel] = defGw.String()
+		ipamConf.AuxAddresses[auxAddrLabel], _ = netip.AddrFromSlice(defGw)
 	}
 
 	return []*libnetwork.IpamConf{ipamConf}, nil

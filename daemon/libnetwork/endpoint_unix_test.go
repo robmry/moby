@@ -4,6 +4,7 @@ package libnetwork
 
 import (
 	"context"
+	"net/netip"
 	"os"
 	"testing"
 
@@ -28,8 +29,8 @@ fe90::2	somehost.example.com somehost
 		NetworkOptionEnableIPv4(true),
 		NetworkOptionEnableIPv6(true),
 		NetworkOptionIpam(defaultipam.DriverName, "",
-			[]*IpamConf{{PreferredPool: "192.168.222.0/24", Gateway: "192.168.222.1"}},
-			[]*IpamConf{{PreferredPool: "fe90::/64", Gateway: "fe90::1"}}, nil),
+			[]*IpamConf{{PreferredPool: netip.MustParsePrefix("192.168.222.0/24"), Gateway: netip.MustParseAddr("192.168.222.1")}},
+			[]*IpamConf{{PreferredPool: netip.MustParsePrefix("fe90::/64"), Gateway: netip.MustParseAddr("fe90::1")}}, nil),
 	}
 
 	ctrlr, nws := getTestEnv(t, opts)

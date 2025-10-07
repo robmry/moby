@@ -46,22 +46,22 @@ func TestNetworkMarshalling(t *testing.T) {
 		},
 		ipamV4Config: []*IpamConf{
 			{
-				PreferredPool: "10.2.0.0/16",
-				SubPool:       "10.2.0.0/24",
-				Gateway:       "",
+				PreferredPool: netip.MustParsePrefix("10.2.0.0/16"),
+				SubPool:       netip.MustParsePrefix("10.2.0.0/24"),
+				Gateway:       netip.Addr{},
 				AuxAddresses:  nil,
 			},
 			{
-				PreferredPool: "10.2.0.0/16",
-				SubPool:       "10.2.1.0/24",
-				Gateway:       "10.2.1.254",
+				PreferredPool: netip.MustParsePrefix("10.2.0.0/16"),
+				SubPool:       netip.MustParsePrefix("10.2.1.0/24"),
+				Gateway:       netip.MustParseAddr("10.2.1.254"),
 			},
 		},
 		ipamV6Config: []*IpamConf{
 			{
-				PreferredPool: "abcd::/64",
-				SubPool:       "abcd:abcd:abcd:abcd:abcd::/80",
-				Gateway:       "abcd::29/64",
+				PreferredPool: netip.MustParsePrefix("abcd::/64"),
+				SubPool:       netip.MustParsePrefix("abcd:abcd:abcd:abcd:abcd::/80"),
+				Gateway:       netip.MustParseAddr("abcd::29"),
 				AuxAddresses:  nil,
 			},
 		},
@@ -254,7 +254,7 @@ func compareIpamConfList(listA, listB []*IpamConf) bool {
 		b = listB[i]
 		if a.PreferredPool != b.PreferredPool ||
 			a.SubPool != b.SubPool ||
-			a.Gateway != b.Gateway || !compareStringMaps(a.AuxAddresses, b.AuxAddresses) {
+			a.Gateway != b.Gateway || !reflect.DeepEqual(a.AuxAddresses, b.AuxAddresses) {
 			return false
 		}
 	}
@@ -337,25 +337,52 @@ func TestAuxAddresses(t *testing.T) {
 	}
 
 	input := []struct {
-		masterPool   string
-		subPool      string
-		auxAddresses map[string]string
+		masterPool   netip.Prefix
+		subPool      netip.Prefix
+		auxAddresses map[string]netip.Addr
 		good         bool
 	}{
-		{"192.168.0.0/16", "", map[string]string{"goodOne": "192.168.2.2"}, true},
-		{"192.168.0.0/16", "", map[string]string{"badOne": "192.169.2.3"}, false},
-		{"192.168.0.0/16", "192.168.1.0/24", map[string]string{"goodOne": "192.168.1.2"}, true},
-		{"192.168.0.0/16", "192.168.1.0/24", map[string]string{"stillGood": "192.168.2.4"}, true},
-		{"192.168.0.0/16", "192.168.1.0/24", map[string]string{"badOne": "192.169.2.4"}, false},
+		{
+			masterPool:   netip.MustParsePrefix("192.168.0.0/16"),
+			auxAddresses: map[string]netip.Addr{"goodOne": netip.MustParseAddr("192.168.2.2")},
+			good:         true,
+		},
+		{
+			masterPool:   netip.MustParsePrefix("192.168.0.0/16"),
+			auxAddresses: map[string]netip.Addr{"badOne": netip.MustParseAddr("192.169.2.3")},
+			good:         false,
+		},
+		{
+			masterPool:   netip.MustParsePrefix("192.168.0.0/16"),
+			subPool:      netip.MustParsePrefix("192.168.1.0/24"),
+			auxAddresses: map[string]netip.Addr{"goodOne": netip.MustParseAddr("192.168.1.2")},
+			good:         true,
+		},
+		{
+			masterPool:   netip.MustParsePrefix("192.168.0.0/16"),
+			subPool:      netip.MustParsePrefix("192.168.1.0/24"),
+			auxAddresses: map[string]netip.Addr{"stillGood": netip.MustParseAddr("192.168.2.4")},
+			good:         true,
+		},
+		{
+			masterPool:   netip.MustParsePrefix("192.168.0.0/16"),
+			subPool:      netip.MustParsePrefix("192.168.1.0/24"),
+			auxAddresses: map[string]netip.Addr{"badOne": netip.MustParseAddr("192.169.2.4")},
+			good:         false,
+		},
 	}
 
-	for _, i := range input {
-		n.ipamV4Config = []*IpamConf{{PreferredPool: i.masterPool, SubPool: i.subPool, AuxAddresses: i.auxAddresses}}
+	for i, tc := range input {
+		n.ipamV4Config = []*IpamConf{{
+			PreferredPool: tc.masterPool,
+			SubPool:       tc.subPool,
+			AuxAddresses:  tc.auxAddresses,
+		}}
 
 		err = n.ipamAllocate()
 
-		if i.good != (err == nil) {
-			t.Fatalf("Unexpected result for %v: %v", i, err)
+		if tc.good != (err == nil) {
+			t.Errorf("Unexpected result for test %d: %v: %v", i, tc, err)
 		}
 
 		n.ipamRelease()
@@ -370,7 +397,9 @@ func TestEndpointNameLabel(t *testing.T) {
 	assert.NilError(t, err)
 	defer c.Stop()
 
-	ipamOpt := NetworkOptionIpam(defaultipam.DriverName, "", []*IpamConf{{PreferredPool: "10.35.0.0/16", Gateway: "10.35.255.253"}}, nil, nil)
+	ipamOpt := NetworkOptionIpam(defaultipam.DriverName, "",
+		[]*IpamConf{{PreferredPool: netip.MustParsePrefix("10.35.0.0/16"), Gateway: netip.MustParseAddr("10.35.255.253")}},
+		nil, nil)
 	gnw, err := c.NewNetwork(context.Background(), "bridge", "label-test", "",
 		NetworkOptionEnableIPv4(true),
 		ipamOpt,
@@ -432,18 +461,16 @@ func TestUpdateSvcRecord(t *testing.T) {
 			defer ctrlr.Stop()
 
 			var ipam4, ipam6 []*IpamConf
-			var ip4, ip6 net.IP
+			var ip4, ip6 netip.Addr
 			if tc.addr4 != "" {
-				var net4 *net.IPNet
-				ip4, net4, err = net.ParseCIDR(tc.addr4)
-				assert.NilError(t, err)
-				ipam4 = []*IpamConf{{PreferredPool: net4.String()}}
+				p := netip.MustParsePrefix(tc.addr4)
+				ip4 = p.Addr()
+				ipam4 = []*IpamConf{{PreferredPool: p.Masked()}}
 			}
 			if tc.addr6 != "" {
-				var net6 *net.IPNet
-				ip6, net6, err = net.ParseCIDR(tc.addr6)
-				assert.NilError(t, err)
-				ipam6 = []*IpamConf{{PreferredPool: net6.String()}}
+				p := netip.MustParsePrefix(tc.addr6)
+				ip6 = p.Addr()
+				ipam6 = []*IpamConf{{PreferredPool: p.Masked()}}
 			}
 			n, err := ctrlr.NewNetwork(context.Background(), "bridge", "net1", "", nil,
 				NetworkOptionEnableIPv4(tc.addr4 != ""),
@@ -454,7 +481,7 @@ func TestUpdateSvcRecord(t *testing.T) {
 			dnsName := "id-" + tc.epName
 			ep, err := n.CreateEndpoint(context.Background(), tc.epName,
 				CreateOptionDNSNames([]string{tc.epName, dnsName}),
-				CreateOptionIPAM(ip4, ip6, nil),
+				CreateOptionIPAM(ip4.AsSlice(), ip6.AsSlice(), nil),
 			)
 			assert.NilError(t, err)
 
@@ -740,7 +767,10 @@ func TestIpamReleaseOnNetDriverFailures(t *testing.T) {
 
 	// Test whether ipam state release is invoked  on network create failure from net driver
 	// by checking whether subsequent network creation requesting same gateway IP succeeds
-	ipamOpt := NetworkOptionIpam(defaultipam.DriverName, "", []*IpamConf{{PreferredPool: "10.34.0.0/16", Gateway: "10.34.255.254"}}, nil, nil)
+	ipamOpt := NetworkOptionIpam(defaultipam.DriverName, "", []*IpamConf{{
+		PreferredPool: netip.MustParsePrefix("10.34.0.0/16"), Gateway: netip.MustParseAddr("10.34.255.254"),
+	}},
+		nil, nil)
 	_, err = c.NewNetwork(context.Background(), badDriverName, "badnet1", "", ipamOpt)
 	assert.Check(t, is.ErrorContains(err, "I will not create any network"))
 
@@ -775,7 +805,9 @@ func TestIpamReleaseOnNetDriverFailures(t *testing.T) {
 	}
 
 	// Now create good bridge network with different gateway
-	ipamOpt2 := NetworkOptionIpam(defaultipam.DriverName, "", []*IpamConf{{PreferredPool: "10.35.0.0/16", Gateway: "10.35.255.253"}}, nil, nil)
+	ipamOpt2 := NetworkOptionIpam(defaultipam.DriverName, "",
+		[]*IpamConf{{PreferredPool: netip.MustParsePrefix("10.35.0.0/16"), Gateway: netip.MustParseAddr("10.35.255.253")}},
+		nil, nil)
 	gnw, err = c.NewNetwork(context.Background(), "bridge", "goodnet2", "",
 		NetworkOptionEnableIPv4(true),
 		ipamOpt2,

@@ -17,6 +17,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/containerd/log"
 	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/v2/daemon/internal/netipstringer"
 	"github.com/moby/moby/v2/daemon/internal/netiputil"
 	"github.com/moby/moby/v2/daemon/internal/stringid"
 	"github.com/moby/moby/v2/daemon/libnetwork/datastore"
@@ -84,27 +85,17 @@ type networkDBTable struct {
 }
 
 // IpamConf contains all the ipam related configurations for a network
-//
-// TODO(aker): use proper net/* structs instead of string literals.
 type IpamConf struct {
 	// PreferredPool is the master address pool for containers and network interfaces.
-	PreferredPool string
+	PreferredPool netip.Prefix
 	// SubPool is a subset of the master pool. If specified,
 	// this becomes the container pool for automatic address allocations.
-	SubPool string
+	SubPool netip.Prefix
 	// Gateway is the preferred Network Gateway address (optional).
-	Gateway string
+	Gateway netip.Addr
 	// AuxAddresses contains auxiliary addresses for network driver. Must be within the master pool.
 	// libnetwork will reserve them if they fall into the container pool.
-	AuxAddresses map[string]string
-}
-
-// Validate checks whether the configuration is valid
-func (c *IpamConf) Validate() error {
-	if c.Gateway != "" && net.ParseIP(c.Gateway) == nil {
-		return types.InvalidParameterErrorf("invalid gateway address %s in Ipam configuration", c.Gateway)
-	}
-	return nil
+	AuxAddresses map[string]netip.Addr
 }
 
 // Contains checks whether the ipam master address pool contains [addr].
@@ -112,18 +103,15 @@ func (c *IpamConf) Contains(addr netip.Addr) bool {
 	if c == nil {
 		return false
 	}
-	if c.PreferredPool == "" {
+	if !c.PreferredPool.IsValid() {
 		return false
 	}
-
-	allowedRange, _ := netiputil.ParseCIDR(c.PreferredPool)
-
-	return allowedRange.Contains(addr)
+	return c.PreferredPool.Contains(addr)
 }
 
 // IsStatic checks whether the subnet was statically allocated (ie. user-defined).
 func (c *IpamConf) IsStatic() bool {
-	return c != nil && c.PreferredPool != ""
+	return c != nil && c.PreferredPool.IsValid()
 }
 
 func (c *IpamConf) IPAMConfig() network.IPAMConfig {
@@ -131,20 +119,15 @@ func (c *IpamConf) IPAMConfig() network.IPAMConfig {
 		return network.IPAMConfig{}
 	}
 
-	subnet, _ := netiputil.ParseCIDR(c.PreferredPool)
-	ipr, _ := netiputil.ParseCIDR(c.SubPool)
-	gw, _ := netip.ParseAddr(c.Gateway)
-
 	conf := network.IPAMConfig{
-		Subnet:  subnet.Masked(),
-		IPRange: ipr.Masked(),
-		Gateway: gw.Unmap(),
+		Subnet:  c.PreferredPool.Masked(),
+		IPRange: c.SubPool.Masked(),
+		Gateway: c.Gateway.Unmap(),
 	}
 
 	if c.AuxAddresses != nil {
-		conf.AuxAddress = maps.Collect(iterutil.Map2(maps.All(c.AuxAddresses), func(k, v string) (string, netip.Addr) {
-			a, _ := netip.ParseAddr(v)
-			return k, a.Unmap()
+		conf.AuxAddress = maps.Collect(iterutil.Map2(maps.All(c.AuxAddresses), func(k string, v netip.Addr) (string, netip.Addr) {
+			return k, v.Unmap()
 		}))
 	}
 	return conf
@@ -1549,10 +1532,6 @@ func (n *Network) ipamAllocateVersion(ipam ipamapi.Ipam, v6 bool, ipamConf []*Ip
 	}).Debug("Allocating pools for network")
 
 	for i, cfg := range ipamConf {
-		if err := cfg.Validate(); err != nil {
-			return nil, err
-		}
-
 		var reserved []netip.Prefix
 		if n.Scope() != scope.Global {
 			reserved = netutils.InferReservedNetworks(v6)
@@ -1561,14 +1540,14 @@ func (n *Network) ipamAllocateVersion(ipam ipamapi.Ipam, v6 bool, ipamConf []*Ip
 		// During network restore, if no subnet was specified in the original network-create
 		// request, use the previously allocated subnet.
 		prefPool := cfg.PreferredPool
-		if prefPool == "" && len(ipamInfo) > i {
-			prefPool = ipamInfo[i].Pool.String()
+		if !prefPool.IsValid() && len(ipamInfo) > i && ipamInfo[i].Pool != nil {
+			prefPool, _ = netiputil.ToPrefix(ipamInfo[i].Pool)
 		}
 
 		alloc, err := ipam.RequestPool(ipamapi.PoolRequest{
 			AddressSpace: n.addrSpace,
-			Pool:         prefPool,
-			SubPool:      cfg.SubPool,
+			Pool:         netipstringer.Prefix(prefPool),
+			SubPool:      netipstringer.Prefix(cfg.SubPool),
 			Options:      n.ipamOptions,
 			Exclude:      reserved,
 			V6:           v6,
@@ -1603,13 +1582,13 @@ func (n *Network) ipamAllocateVersion(ipam ipamapi.Ipam, v6 bool, ipamConf []*Ip
 		// During network restore, if the original network-create request did not specify a
 		// gateway, use the previously allocated gateway.
 		prefGateway := cfg.Gateway
-		if prefGateway == "" && len(ipamInfo) > i && ipamInfo[i].Gateway != nil {
-			prefGateway = ipamInfo[i].Gateway.IP.String()
+		if !prefGateway.IsValid() && len(ipamInfo) > i && ipamInfo[i].Gateway != nil {
+			prefGateway, _ = netip.AddrFromSlice(ipamInfo[i].Gateway.IP)
 		}
 
 		// If there's no user-configured gateway address but the IPAM driver returned a gw when it
 		// set up the pool, use it. (It doesn't need to be requested/reserved in IPAM.)
-		if prefGateway == "" {
+		if !prefGateway.IsValid() {
 			if gws, ok := d.Meta[netlabel.Gateway]; ok {
 				if d.Gateway, err = types.ParseCIDR(gws); err != nil {
 					return nil, types.InvalidParameterErrorf("failed to parse gateway address (%v) returned by ipam driver: %v", gws, err)
@@ -1619,11 +1598,11 @@ func (n *Network) ipamAllocateVersion(ipam ipamapi.Ipam, v6 bool, ipamConf []*Ip
 
 		// If there's still no gateway, reserve cfg.Gateway if the user specified it. Else,
 		// if the driver wants a gateway, let the IPAM driver select an address.
-		if d.Gateway == nil && (prefGateway != "" || !skipGwAlloc) {
+		if d.Gateway == nil && (prefGateway.IsValid() || !skipGwAlloc) {
 			gatewayOpts := map[string]string{
 				ipamapi.RequestAddressType: netlabel.Gateway,
 			}
-			if d.Gateway, _, err = ipam.RequestAddress(d.PoolID, net.ParseIP(prefGateway), gatewayOpts); err != nil {
+			if d.Gateway, _, err = ipam.RequestAddress(d.PoolID, prefGateway.AsSlice(), gatewayOpts); err != nil {
 				return nil, types.InternalErrorf("failed to allocate gateway (%v): %v", prefGateway, err)
 			}
 		}
@@ -1634,10 +1613,7 @@ func (n *Network) ipamAllocateVersion(ipam ipamapi.Ipam, v6 bool, ipamConf []*Ip
 			var ip net.IP
 			d.IPAMData.AuxAddresses = make(map[string]*net.IPNet, len(cfg.AuxAddresses))
 			for k, v := range cfg.AuxAddresses {
-				if ip = net.ParseIP(v); ip == nil {
-					return nil, types.InvalidParameterErrorf("non parsable secondary ip address (%s:%s) passed for network %s", k, v, n.Name())
-				}
-				if !d.Pool.Contains(ip) {
+				if !d.Pool.Contains(v.AsSlice()) {
 					return nil, types.ForbiddenErrorf("auxiliary address: (%s:%s) must belong to the master pool: %s", k, v, d.Pool)
 				}
 				// Attempt reservation in the container addressable pool, silent the error if address does not belong to that pool
@@ -1916,8 +1892,8 @@ func (n *Network) UpdateIpamConfig(ipV4Data []driverapi.IPAMData) {
 
 	for i, data := range ipV4Data {
 		ic := &IpamConf{}
-		ic.PreferredPool = data.Pool.String()
-		ic.Gateway = data.Gateway.IP.String()
+		ic.PreferredPool, _ = netiputil.ToPrefix(data.Pool)
+		ic.Gateway, _ = netip.AddrFromSlice(data.Gateway.IP)
 		ipamV4Config[i] = ic
 	}
 
