@@ -263,6 +263,11 @@ func (daemon *Daemon) create(ctx context.Context, daemonCfg *config.Config, opts
 	}
 
 	daemon.updateContainerNetworkSettings(ctr, endpointsConfigs)
+
+	if err := daemon.nri.CreateContainer(ctx, ctr); err != nil {
+		return nil, err
+	}
+
 	if err := daemon.register(ctx, ctr); err != nil {
 		return nil, err
 	}
