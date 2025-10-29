@@ -74,6 +74,12 @@ const (
 	// LibnetDataPath is the path to libnetwork's data directory, relative to cfg.Root.
 	// Windows tolerates the "/".
 	LibnetDataPath = "network/files"
+	// NRIDefaultPluginPath is the default location for NRI plugins.
+	NRIDefaultPluginPath = "/var/run/docker/nri-plugins"
+	// NRIDefaultPluginConfigPath is the default location for NRI plugin config.
+	NRIDefaultPluginConfigPath = "/etc/docker/nri/conf.d"
+	// NRIDefaultSocketPath is the default location for the daemon's NRI socket.
+	NRIDefaultSocketPath = "/var/run/docker/nri.sock"
 )
 
 // flatOptions contains configuration keys
@@ -245,6 +251,7 @@ type CommonConfig struct {
 
 	DaemonLogConfig         // DaemonLogConfig holds options for configuring the daemon's logging.
 	TLSOptions              // TLSOptions defines TLS configuration for the API server.
+	NRIConfig               // NRIConfig defines NRI configuration options.
 	DNSConfig               // DNSConfig defines default DNS options for containers.
 	LogConfig               // LogConfig defines default log configuration for containers.
 	BridgeConfig            // BridgeConfig holds bridge network specific configuration.
@@ -301,6 +308,14 @@ type DaemonLogConfig struct {
 	LogLevel  string           `json:"log-level,omitempty"`
 	LogFormat log.OutputFormat `json:"log-format,omitempty"`
 	RawLogs   bool             `json:"raw-logs,omitempty"`
+}
+
+// NRIConfig holds NRI configuration options.
+type NRIConfig struct {
+	NRIEnable           bool   `json:"nri-enable,omitempty"`
+	NRIPluginPath       string `json:"nri-plugin-path,omitempty"`
+	NRIPluginConfigPath string `json:"nri-plugin-config-path,omitempty"`
+	NRISocketPath       string `json:"nri-socket-path,omitempty"`
 }
 
 // Proxies holds the proxies that are configured for the daemon.

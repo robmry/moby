@@ -38,6 +38,7 @@ import (
 	networktypes "github.com/moby/moby/api/types/network"
 	registrytypes "github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/v2/daemon/internal/nri"
 	"github.com/moby/sys/user"
 	"github.com/moby/sys/userns"
 	"github.com/pkg/errors"
@@ -118,6 +119,7 @@ type Daemon struct {
 	shutdown          bool
 	idMapping         user.IdentityMapping
 	PluginStore       *plugin.Store // TODO: remove
+	nri               *nri.NRI
 	pluginManager     *plugin.Manager
 	linkIndex         *linkIndex
 	containerdClient  *containerd.Client
@@ -1113,6 +1115,14 @@ func NewDaemon(ctx context.Context, config *config.Config, pluginStore *plugin.S
 		return nil, err
 	}
 
+	d.nri, err = nri.NewNRI(ctx, nri.Config{
+		DaemonConfig:    config.NRIConfig,
+		ContainerLister: d.containers,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	// On Windows we don't support the environment variable, or a user supplied graphdriver,
 	// but it is allowed when using snapshotters.
 	// Unix platforms however run a single graphdriver for all containers, and it can
@@ -1532,6 +1542,10 @@ func (daemon *Daemon) Shutdown(ctx context.Context) error {
 
 	// Shutdown plugins after containers and layerstore. Don't change the order.
 	daemon.pluginShutdown()
+
+	if daemon.nri != nil {
+		daemon.nri.Shutdown(ctx)
+	}
 
 	// trigger libnetwork Stop only if it's initialized
 	if daemon.netController != nil {
