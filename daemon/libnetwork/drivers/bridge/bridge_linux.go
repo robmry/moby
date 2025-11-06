@@ -54,9 +54,6 @@ const (
 	DefaultGatewayV4AuxKey = "DefaultGatewayIPv4"
 	// DefaultGatewayV6AuxKey represents the ipv6 default-gateway configured by the user
 	DefaultGatewayV6AuxKey = "DefaultGatewayIPv6"
-
-	ContainerGatewayIPv4 = "com.docker.network.container-gateway-ipv4"
-	ContainerGatewayIPv6 = "com.docker.network.container-gateway-ipv6"
 )
 
 const spanPrefix = "libnetwork.drivers.bridge"
@@ -100,15 +97,13 @@ type networkConfiguration struct {
 	HostIPv6              net.IP
 	ContainerIfacePrefix  string
 	// Internal fields set after ipam data parsing
-	AddressIPv4          *net.IPNet
-	AddressIPv6          *net.IPNet
-	DefaultGatewayIPv4   net.IP
-	DefaultGatewayIPv6   net.IP
-	ContainerGatewayIPv4 net.IP
-	ContainerGatewayIPv6 net.IP
-	dbIndex              uint64
-	dbExists             bool
-	Internal             bool
+	AddressIPv4        *net.IPNet
+	AddressIPv6        *net.IPNet
+	DefaultGatewayIPv4 net.IP
+	DefaultGatewayIPv6 net.IP
+	dbIndex            uint64
+	dbExists           bool
+	Internal           bool
 
 	BridgeIfaceCreator ifaceCreator
 }
@@ -596,9 +591,6 @@ func (ncfg *networkConfiguration) processIPAM(ipamV4Data, ipamV6Data []driverapi
 		if gw, ok := ipamV4Data[0].AuxAddresses[DefaultGatewayV4AuxKey]; ok {
 			ncfg.DefaultGatewayIPv4 = gw.IP
 		}
-		if gw, ok := ipamV4Data[0].AuxAddresses[ContainerGatewayIPv4]; ok {
-			ncfg.ContainerGatewayIPv4 = gw.IP
-		}
 	}
 
 	if len(ipamV6Data) > 0 {
@@ -610,9 +602,6 @@ func (ncfg *networkConfiguration) processIPAM(ipamV4Data, ipamV6Data []driverapi
 
 		if gw, ok := ipamV6Data[0].AuxAddresses[DefaultGatewayV6AuxKey]; ok {
 			ncfg.DefaultGatewayIPv6 = gw.IP
-		}
-		if gw, ok := ipamV4Data[0].AuxAddresses[ContainerGatewayIPv6]; ok {
-			ncfg.ContainerGatewayIPv6 = gw.IP
 		}
 	}
 
@@ -1440,18 +1429,7 @@ func (d *driver) Join(ctx context.Context, nid, eid string, sboxKey string, jinf
 		return err
 	}
 
-	if network.config.Internal {
-		if network.config.ContainerGatewayIPv4 != nil {
-			if err := jinfo.SetGateway(network.config.ContainerGatewayIPv4); err != nil {
-				return err
-			}
-		}
-		if network.config.ContainerGatewayIPv6 != nil {
-			if err := jinfo.SetGatewayIPv6(network.config.ContainerGatewayIPv6); err != nil {
-				return err
-			}
-		}
-	} else {
+	if !network.config.Internal {
 		if err := jinfo.SetGateway(network.bridge.gatewayIPv4); err != nil {
 			return err
 		}
