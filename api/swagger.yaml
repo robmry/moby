@@ -2589,6 +2589,15 @@ definitions:
         x-go-type:
           type: SubnetStatuses
           kind: map
+      NamedReservations:
+        type: "object"
+        x-omitempty: true
+        additionalProperties:
+          type: "array"
+          items:
+            type: "string"
+        example:
+          "my_reserved_addrs": ["172.16.0.10", "2001:db8:abcd:0012::10"]
 
   SubnetStatus:
     type: "object"

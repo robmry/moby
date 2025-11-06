@@ -1233,7 +1233,29 @@ func (n *Network) createEndpoint(ctx context.Context, name string, options ...En
 
 	wantIPv6 := n.enableIPv6 && !ep.disableIPv6
 
-	if err = ep.assignAddress(ipam, n.enableIPv4, wantIPv6); err != nil {
+	if opt, ok := ep.generic["ipam-reservation"]; ok {
+		reservation, ok := opt.(string)
+		if !ok {
+			return nil, errors.New("ipam-reservation must be a string")
+		}
+		// TODO(robmry)
+		// - IPv6
+		// - check v6/v6 enable
+		// - check no explicit address requested
+		// - check reservation not already used
+		// - check reservation found
+		// - update ep.releaseIPAddresses()
+		// - use a com.docker label
+		for _, info := range n.ipamV4Info {
+			if addr, ok := info.Meta[reservation]; ok {
+				ip := net.ParseIP(addr)
+				if ip == nil {
+					return nil, fmt.Errorf("failed to parse reserved IP address %s=%s: %w", reservation, addr, err)
+				}
+				ep.iface.addr = &net.IPNet{IP: ip, Mask: info.IPAMData.Pool.Mask}
+			}
+		}
+	} else if err = ep.assignAddress(ipam, n.enableIPv4, wantIPv6); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -2215,6 +2237,18 @@ func (n *Network) IPAMStatus(ctx context.Context) (network.IPAMStatus, error) {
 		}
 		prefix, _ := netiputil.ToPrefix(info.Pool)
 		status.Subnets[prefix] = pstat
+
+		for res, addr := range info.Meta {
+			if status.NamedReservations == nil {
+				status.NamedReservations = make(map[string][]string)
+			}
+			addrs, ok := status.NamedReservations[res]
+			if !ok {
+				addrs = []string{}
+			}
+			addrs = append(addrs, addr)
+			status.NamedReservations[res] = addrs
+		}
 	}
 
 	return status, errors.Join(errs...)

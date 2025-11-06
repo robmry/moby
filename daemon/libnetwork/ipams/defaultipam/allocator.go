@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 
 	"github.com/containerd/log"
 	"github.com/moby/moby/api/types/network"
@@ -122,17 +123,43 @@ func (a *Allocator) GetDefaultAddressSpaces() (string, string, error) {
 // requestedSubPool must be empty if requestedPool is empty.
 func (a *Allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool, error) {
 	log.G(context.TODO()).Debugf("RequestPool: %+v", req)
+	k, err := a.requestPool(req)
+	if err != nil {
+		return ipamapi.AllocatedPool{}, err
+	}
 
+	aSpace, err := a.getAddrSpace(req.AddressSpace, req.V6)
+	if err != nil {
+		return ipamapi.AllocatedPool{}, err
+	}
+
+	var meta map[string]string
+	if reserve, ok := req.Options["reserve"]; ok {
+		rs := strings.Split(reserve, ",")
+		meta = make(map[string]string, len(rs))
+		for _, r := range rs {
+			addr, err := aSpace.requestAddress(k.Subnet, k.ChildSubnet, netip.Addr{}, nil)
+			if err != nil {
+				return ipamapi.AllocatedPool{}, types.InternalErrorf("failed to reserve address %s: %v", r, err)
+			}
+			meta[r] = addr.String()
+		}
+	}
+
+	return ipamapi.AllocatedPool{PoolID: k.String(), Pool: k.Subnet, Meta: meta}, nil
+}
+
+func (a *Allocator) requestPool(req ipamapi.PoolRequest) (PoolID, error) {
 	parseErr := func(err error) error {
 		return types.InternalErrorf("failed to parse pool request for address space %q pool %q subpool %q: %v", req.AddressSpace, req.Pool, req.SubPool, err)
 	}
 
 	if req.AddressSpace == "" {
-		return ipamapi.AllocatedPool{}, parseErr(ipamapi.ErrInvalidAddressSpace)
+		return PoolID{}, parseErr(ipamapi.ErrInvalidAddressSpace)
 	}
 	aSpace, err := a.getAddrSpace(req.AddressSpace, req.V6)
 	if err != nil {
-		return ipamapi.AllocatedPool{}, err
+		return PoolID{}, err
 	}
 
 	k := PoolID{AddressSpace: req.AddressSpace}
@@ -142,7 +169,7 @@ func (a *Allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 	if req.Pool != "" {
 		prefix, err := netip.ParsePrefix(req.Pool)
 		if err != nil {
-			return ipamapi.AllocatedPool{}, parseErr(ipamapi.ErrInvalidPool)
+			return PoolID{}, parseErr(ipamapi.ErrInvalidPool)
 		}
 
 		if prefix.Addr().IsUnspecified() {
@@ -160,25 +187,25 @@ func (a *Allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 	}
 
 	if req.Pool == "" && req.SubPool != "" {
-		return ipamapi.AllocatedPool{}, parseErr(ipamapi.ErrInvalidSubPool)
+		return PoolID{}, parseErr(ipamapi.ErrInvalidSubPool)
 	}
 
 	if req.Pool == "" {
 		if k.Subnet, err = aSpace.allocatePredefinedPool(req.Exclude, prefixLength); err != nil {
-			return ipamapi.AllocatedPool{}, err
+			return PoolID{}, err
 		}
-		return ipamapi.AllocatedPool{PoolID: k.String(), Pool: k.Subnet}, nil
+		return k, nil
 	}
 
 	if req.SubPool != "" {
 		if k.ChildSubnet, err = netip.ParsePrefix(req.SubPool); err != nil {
-			return ipamapi.AllocatedPool{}, types.InternalErrorf("invalid pool request: %v", ipamapi.ErrInvalidSubPool)
+			return PoolID{}, types.InternalErrorf("invalid pool request: %v", ipamapi.ErrInvalidSubPool)
 		}
 	}
 
 	// This is a new non-master pool (subPool)
 	if k.Subnet.IsValid() && k.ChildSubnet.IsValid() && k.Subnet.Addr().BitLen() != k.ChildSubnet.Addr().BitLen() {
-		return ipamapi.AllocatedPool{}, types.InvalidParameterErrorf("pool and subpool are of incompatible address families")
+		return PoolID{}, types.InvalidParameterErrorf("pool and subpool are of incompatible address families")
 	}
 
 	k.Subnet, k.ChildSubnet = k.Subnet.Masked(), k.ChildSubnet.Masked()
@@ -192,10 +219,10 @@ func (a *Allocator) RequestPool(req ipamapi.PoolRequest) (ipamapi.AllocatedPool,
 
 	err = aSpace.allocateSubnet(k.Subnet, k.ChildSubnet)
 	if err != nil {
-		return ipamapi.AllocatedPool{}, types.ForbiddenErrorf("invalid pool request: %v", err)
+		return PoolID{}, types.ForbiddenErrorf("invalid pool request: %v", err)
 	}
 
-	return ipamapi.AllocatedPool{PoolID: k.String(), Pool: k.Subnet}, nil
+	return k, nil
 }
 
 // ReleasePool releases the address pool identified by the passed id
