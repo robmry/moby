@@ -1245,14 +1245,22 @@ func (ep *Endpoint) releaseIPAddresses() {
 	}
 
 	if ep.iface.addr != nil {
-		if err := ipam.ReleaseAddress(ep.iface.v4PoolID, ep.iface.addr.IP); err != nil {
-			log.G(context.TODO()).Warnf("Failed to release ip address %s on delete of endpoint %s (%s): %v", ep.iface.addr.IP, ep.Name(), ep.ID(), err)
+		// Try to release from named reservations first - if successful, don't release from IPAM
+		if err := n.releaseNamedAddressReservation(ep.iface.addr.IP.String()); err != nil {
+			// Address was not from a reservation, release from IPAM
+			if err := ipam.ReleaseAddress(ep.iface.v4PoolID, ep.iface.addr.IP); err != nil {
+				log.G(context.TODO()).Warnf("Failed to release ip address %s on delete of endpoint %s (%s): %v", ep.iface.addr.IP, ep.Name(), ep.ID(), err)
+			}
 		}
 	}
 
 	if ep.iface.addrv6 != nil {
-		if err := ipam.ReleaseAddress(ep.iface.v6PoolID, ep.iface.addrv6.IP); err != nil {
-			log.G(context.TODO()).Warnf("Failed to release ip address %s on delete of endpoint %s (%s): %v", ep.iface.addrv6.IP, ep.Name(), ep.ID(), err)
+		// Try to release from named reservations first - if successful, don't release from IPAM
+		if err := n.releaseNamedAddressReservation(ep.iface.addrv6.IP.String()); err != nil {
+			// Address was not from a reservation, release from IPAM
+			if err := ipam.ReleaseAddress(ep.iface.v6PoolID, ep.iface.addrv6.IP); err != nil {
+				log.G(context.TODO()).Warnf("Failed to release ip address %s on delete of endpoint %s (%s): %v", ep.iface.addrv6.IP, ep.Name(), ep.ID(), err)
+			}
 		}
 	}
 }

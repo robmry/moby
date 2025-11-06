@@ -201,42 +201,43 @@ func (i *IpamInfo) UnmarshalJSON(data []byte) error {
 // Network represents a logical connectivity zone that containers may
 // join using the Link method. A network is managed by a specific driver.
 type Network struct {
-	ctrlr            *Controller
-	name             string
-	networkType      string // networkType is the name of the netdriver used by this network
-	id               string
-	created          time.Time
-	scope            string // network data scope
-	labels           map[string]string
-	ipamType         string // ipamType is the name of the IPAM driver
-	ipamOptions      map[string]string
-	addrSpace        string
-	ipamV4Config     []*IpamConf
-	ipamV6Config     []*IpamConf
-	ipamV4Info       []*IpamInfo
-	ipamV6Info       []*IpamInfo
-	enableIPv4       bool
-	enableIPv6       bool
-	generic          options.Generic
-	dbIndex          uint64
-	dbExists         bool
-	persist          bool
-	drvOnce          *sync.Once
-	resolver         []*Resolver
-	internal         bool
-	attachable       bool
-	inDelete         bool
-	ingress          bool
-	driverTables     []networkDBTable
-	dynamic          bool
-	configOnly       bool
-	configFrom       string
-	loadBalancerIP   net.IP
-	loadBalancerMode string
-	skipGwAllocIPv4  bool
-	skipGwAllocIPv6  bool
-	platformNetwork  //nolint:nolintlint,unused // only populated on windows
-	mu               sync.Mutex
+	ctrlr             *Controller
+	name              string
+	networkType       string // networkType is the name of the netdriver used by this network
+	id                string
+	created           time.Time
+	scope             string // network data scope
+	labels            map[string]string
+	ipamType          string // ipamType is the name of the IPAM driver
+	ipamOptions       map[string]string
+	addrSpace         string
+	ipamV4Config      []*IpamConf
+	ipamV6Config      []*IpamConf
+	ipamV4Info        []*IpamInfo
+	ipamV6Info        []*IpamInfo
+	enableIPv4        bool
+	enableIPv6        bool
+	generic           options.Generic
+	dbIndex           uint64
+	dbExists          bool
+	persist           bool
+	drvOnce           *sync.Once
+	resolver          []*Resolver
+	internal          bool
+	attachable        bool
+	inDelete          bool
+	ingress           bool
+	driverTables      []networkDBTable
+	dynamic           bool
+	configOnly        bool
+	configFrom        string
+	loadBalancerIP    net.IP
+	loadBalancerMode  string
+	skipGwAllocIPv4   bool
+	skipGwAllocIPv6   bool
+	platformNetwork                  //nolint:nolintlint,unused // only populated on windows
+	inUseReservations map[string]any // tracks which reservation names are currently in use
+	mu                sync.Mutex
 }
 
 const (
@@ -342,9 +343,10 @@ func (n *Network) New() datastore.KVObject {
 	defer n.mu.Unlock()
 
 	return &Network{
-		ctrlr:   n.ctrlr,
-		drvOnce: &sync.Once{},
-		scope:   n.scope,
+		ctrlr:             n.ctrlr,
+		drvOnce:           &sync.Once{},
+		scope:             n.scope,
+		inUseReservations: make(map[string]any),
 	}
 }
 
@@ -520,6 +522,9 @@ func (n *Network) CopyTo(o datastore.KVObject) error {
 	dstN.loadBalancerMode = n.loadBalancerMode
 	dstN.skipGwAllocIPv4 = n.skipGwAllocIPv4
 	dstN.skipGwAllocIPv6 = n.skipGwAllocIPv6
+
+	// copy in-use reservations
+	dstN.inUseReservations = maps.Clone(n.inUseReservations)
 
 	// copy labels
 	if dstN.labels == nil {
@@ -1188,7 +1193,7 @@ func (n *Network) CreateEndpoint(ctx context.Context, name string, options ...En
 	return n.createEndpoint(ctx, name, options...)
 }
 
-func (n *Network) createEndpoint(ctx context.Context, name string, options ...EndpointOption) (*Endpoint, error) {
+func (n *Network) createEndpoint(ctx context.Context, name string, options ...EndpointOption) (_ *Endpoint, retErr error) {
 	var err error
 
 	ep := &Endpoint{name: name, generic: make(map[string]any), iface: &EndpointInterface{}}
@@ -1236,24 +1241,72 @@ func (n *Network) createEndpoint(ctx context.Context, name string, options ...En
 	if opt, ok := ep.generic["ipam-reservation"]; ok {
 		reservation, ok := opt.(string)
 		if !ok {
-			return nil, errors.New("ipam-reservation must be a string")
+			return nil, errors.New("reservation must be a string")
 		}
-		// TODO(robmry)
-		// - IPv6
-		// - check v6/v6 enable
-		// - check no explicit address requested
-		// - check reservation not already used
-		// - check reservation found
-		// - update ep.releaseIPAddresses()
-		// - use a com.docker label
-		for _, info := range n.ipamV4Info {
-			if addr, ok := info.Meta[reservation]; ok {
-				ip := net.ParseIP(addr)
-				if ip == nil {
-					return nil, fmt.Errorf("failed to parse reserved IP address %s=%s: %w", reservation, addr, err)
+
+		// Check if explicit addresses are requested (which conflicts with reservations)
+		if ep.prefAddress != nil || ep.prefAddressV6 != nil {
+			return nil, errors.New("cannot use IPAM reservation with explicit IP address request")
+		}
+
+		// Process IPv4 reservations if IPv4 is enabled
+		if n.enableIPv4 {
+			for _, info := range n.ipamV4Info {
+				if addr, ok := info.Meta[reservation]; ok {
+					ip := net.ParseIP(addr)
+					if ip == nil {
+						return nil, fmt.Errorf("failed to parse reserved IPv4 address %s=%s", reservation, addr)
+					}
+					if ip.To4() == nil {
+						return nil, fmt.Errorf("reserved address %s=%s is not a valid IPv4 address", reservation, addr)
+					}
+					if !n.useNamedAddressReservation(addr) {
+						return nil, fmt.Errorf("IPv4 reservation address %s is already in use", addr)
+					}
+					defer func() {
+						if retErr != nil {
+							_ = n.releaseNamedAddressReservation(addr)
+						}
+					}()
+					ep.iface.addr = &net.IPNet{IP: ip, Mask: info.IPAMData.Pool.Mask}
+					ep.iface.v4PoolID = info.PoolID
+					break
 				}
-				ep.iface.addr = &net.IPNet{IP: ip, Mask: info.IPAMData.Pool.Mask}
 			}
+		}
+
+		// Process IPv6 reservations if IPv6 is enabled
+		if wantIPv6 {
+			for _, info := range n.ipamV6Info {
+				if addr, ok := info.Meta[reservation]; ok {
+					ip := net.ParseIP(addr)
+					if ip == nil {
+						return nil, fmt.Errorf("failed to parse reserved IPv6 address %s=%s", reservation, addr)
+					}
+					if ip.To4() != nil {
+						return nil, fmt.Errorf("reserved address %s=%s is not a valid IPv6 address", reservation, addr)
+					}
+					if !n.useNamedAddressReservation(addr) {
+						return nil, fmt.Errorf("IPv6 reservation address %s is already in use", addr)
+					}
+					defer func() {
+						if retErr != nil {
+							_ = n.releaseNamedAddressReservation(addr)
+						}
+					}()
+					ep.iface.addrv6 = &net.IPNet{IP: ip, Mask: info.IPAMData.Pool.Mask}
+					ep.iface.v6PoolID = info.PoolID
+					break
+				}
+			}
+		}
+
+		// Verify at least one reservation was found
+		if n.enableIPv4 && ep.iface.addr == nil {
+			return nil, fmt.Errorf("IPv4 reservation %q not found in network IPAM metadata", reservation)
+		}
+		if wantIPv6 && ep.iface.addrv6 == nil {
+			return nil, fmt.Errorf("IPv6 reservation %q not found in network IPAM metadata", reservation)
 		}
 	} else if err = ep.assignAddress(ipam, n.enableIPv4, wantIPv6); err != nil {
 		return nil, err
@@ -2252,4 +2305,31 @@ func (n *Network) IPAMStatus(ctx context.Context) (network.IPAMStatus, error) {
 	}
 
 	return status, errors.Join(errs...)
+}
+
+// useNamedAddressReservation attempts to reserve the specified address.
+// It returns true if the reservation was successful (address was not already in use).
+// The address is stored in the inUseReservations map for tracking.
+func (n *Network) useNamedAddressReservation(addr string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if _, inUse := n.inUseReservations[addr]; inUse {
+		return false
+	}
+	n.inUseReservations[addr] = struct{}{}
+	return true
+}
+
+// releaseNamedAddressReservation removes the specified address from the inUseReservations map.
+// Returns an error if the address is not found in the map.
+func (n *Network) releaseNamedAddressReservation(addr string) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if _, exists := n.inUseReservations[addr]; !exists {
+		return fmt.Errorf("address %s is not currently reserved", addr)
+	}
+	delete(n.inUseReservations, addr)
+	return nil
 }

@@ -75,6 +75,9 @@ const (
 	// container, when the default binding address is 0.0.0.0. This label
 	// is intended for internal use, it may be removed in a future release.
 	NoProxy6To4 = DriverPrivatePrefix + ".no_proxy_6to4"
+
+	// ContainerGateway is the IPAM address reservation name for a container gateway.
+	ContainerGateway = Prefix + ".container-gateway"
 )
 
 // GetIfname returns the value associated to the Ifname netlabel from the
