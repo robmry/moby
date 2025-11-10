@@ -93,6 +93,9 @@ func (n *NRI) CreateContainer(ctx context.Context, ctr *container.Container) err
 		return err
 	}
 
+	if resp.GetAdjust() != nil {
+		return errors.New("container adjustment is not supported")
+	}
 	if err := applyAdjustments(ctr, resp.GetAdjust()); err != nil {
 		return err
 	}
@@ -218,7 +221,6 @@ func applyAdjustments(ctr *container.Container, adj *adaptation.ContainerAdjustm
 	return nil
 }
 
-// TODO(robmry) - env vars set here will show up in "inspect", is that a problem for secrets?
 func applyEnvVars(ctr *container.Container, envVars []*adaptation.KeyValue) error {
 	if len(envVars) == 0 {
 		return nil
