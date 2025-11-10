@@ -155,7 +155,7 @@ func containerToNRI(ctr *container.Container) (*adaptation.PodSandbox, *adaptati
 		Name:         ctr.Name,
 		State:        stateToNRI(ctr.State),
 		Labels:       ctr.Config.Labels,
-		Annotations:  nil,
+		Annotations:  ctr.HostConfig.Annotations,
 		Args:         ctr.Config.Cmd,
 		Env:          ctr.Config.Env,
 		Hooks:        nil,
