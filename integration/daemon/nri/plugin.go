@@ -30,16 +30,18 @@ import (
 )
 
 type config struct {
-	CfgParam1 string `json:"cfgParam1"`
+	pluginName string
+	pluginIdx  string
+	sockPath   string
+	dirToMount string
 }
 
 type plugin struct {
-	stub stub.Stub
-	mask stub.EventMask
-	logG func(context.Context) *log.Entry
+	stub   stub.Stub
+	mask   stub.EventMask
+	logG   func(context.Context) *log.Entry
+	config config
 }
-
-var cfg config
 
 func (p *plugin) Configure(ctx context.Context, config, runtime, version string) (stub.EventMask, error) {
 	p.logG(ctx).Infof("Connected to %s/%s...", runtime, version)
@@ -92,13 +94,22 @@ func (p *plugin) CreateContainer(ctx context.Context, pod *api.PodSandbox, ctr *
 
 	adjustment := &api.ContainerAdjustment{
 		Annotations: nil,
-		Mounts:      nil,
+		Mounts: []*api.Mount{
+			{
+				Type:        "bind",
+				Destination: "/bindmount",
+				Source:      p.config.dirToMount,
+				Options:     []string{"ro"},
+			},
+		},
 		Env: []*api.KeyValue{
 			{
+				// Update existing.
 				Key:   "HOSTNAME",
 				Value: "nrivictim",
 			},
 			{
+				// Add new.
 				Key:   "NRI_SAYS",
 				Value: "hello world!",
 			},
@@ -170,17 +181,18 @@ func (p *plugin) onClose() {
 	p.logG(context.Background()).Infof("Connection to the runtime lost.")
 }
 
-func startPlugin(ctx context.Context, t *testing.T, pluginName, pluginIdx, sockPath string) (*plugin, error) {
+func startPlugin(ctx context.Context, t *testing.T, cfg config) (*plugin, error) {
 	p := &plugin{
 		logG: func(ctx context.Context) *log.Entry {
-			return log.G(ctx).WithField("nri-plugin", pluginIdx+"-"+pluginName)
+			return log.G(ctx).WithField("nri-plugin", cfg.pluginIdx+"-"+cfg.pluginName)
 		},
+		config: cfg,
 	}
 	stub, err := stub.New(p,
 		stub.WithOnClose(p.onClose),
-		stub.WithPluginName(pluginName),
-		stub.WithPluginIdx(pluginIdx),
-		stub.WithSocketPath(sockPath),
+		stub.WithPluginName(cfg.pluginName),
+		stub.WithPluginIdx(cfg.pluginIdx),
+		stub.WithSocketPath(cfg.sockPath),
 	)
 	assert.Assert(t, err)
 	p.stub = stub

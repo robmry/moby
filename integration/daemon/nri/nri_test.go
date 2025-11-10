@@ -1,6 +1,7 @@
 package nri
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -22,6 +23,10 @@ func TestNRI(t *testing.T) {
 
 	tmp := t.TempDir()
 	sockPath := filepath.Join(tmp, "nri.sock")
+	dirToMount := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dirToMount, "nri-file.txt"), []byte("hello world!"), 0o644); err != nil {
+		assert.NilError(t, err)
+	}
 
 	d := daemon.New(t)
 	d.StartWithBusybox(ctx, t,
@@ -32,7 +37,12 @@ func TestNRI(t *testing.T) {
 
 	c := d.NewClientT(t)
 
-	p, err := startPlugin(ctx, t, "nritestplugin", "00", sockPath)
+	p, err := startPlugin(ctx, t, config{
+		pluginName: "nritestplugin",
+		pluginIdx:  "00",
+		sockPath:   sockPath,
+		dirToMount: dirToMount,
+	})
 	assert.NilError(t, err)
 	defer p.stub.Stop()
 
@@ -41,5 +51,6 @@ func TestNRI(t *testing.T) {
 
 	inspect, err := c.ContainerInspect(ctx, ctrId, client.ContainerInspectOptions{})
 	assert.NilError(t, err)
+	assert.Check(t, is.Contains(inspect.Container.Config.Env, "HOSTNAME=nrivictim"))
 	assert.Check(t, is.Contains(inspect.Container.Config.Env, "NRI_SAYS=hello world!"))
 }
