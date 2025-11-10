@@ -75,7 +75,9 @@ const (
 	// Windows tolerates the "/".
 	LibnetDataPath = "network/files"
 	// NRIDefaultPluginPath is the default location for NRI plugins.
-	NRIDefaultPluginPath = "/var/run/docker/nri-plugins"
+	//
+	// FIXME(robmry) - is there a better place?
+	NRIDefaultPluginPath = "/opt/docker/nri/plugins"
 	// NRIDefaultPluginConfigPath is the default location for NRI plugin config.
 	NRIDefaultPluginConfigPath = "/etc/docker/nri/conf.d"
 	// NRIDefaultSocketPath is the default location for the daemon's NRI socket.
