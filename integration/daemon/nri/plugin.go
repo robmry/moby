@@ -30,10 +30,10 @@ import (
 )
 
 type config struct {
-	pluginName string
-	pluginIdx  string
-	sockPath   string
-	dirToMount string
+	pluginName   string
+	pluginIdx    string
+	sockPath     string
+	ctrCreateAdj *api.ContainerAdjustment
 }
 
 type plugin struct {
@@ -92,35 +92,7 @@ func (p *plugin) CreateContainer(ctx context.Context, pod *api.PodSandbox, ctr *
 	// functions in pkg/api/update.go to see the available controls.
 	//
 
-	adjustment := &api.ContainerAdjustment{
-		Annotations: nil,
-		Mounts: []*api.Mount{
-			{
-				Type:        "bind",
-				Destination: "/bindmount",
-				Source:      p.config.dirToMount,
-				Options:     []string{"ro"},
-			},
-		},
-		Env: []*api.KeyValue{
-			{
-				// Update existing.
-				Key:   "HOSTNAME",
-				Value: "nrivictim",
-			},
-			{
-				// Add new.
-				Key:   "NRI_SAYS",
-				Value: "hello world!",
-			},
-		},
-		Hooks:   nil,
-		Linux:   nil,
-		Rlimits: nil,
-	}
-	updates := []*api.ContainerUpdate{}
-
-	return adjustment, updates, nil
+	return p.config.ctrCreateAdj, []*api.ContainerUpdate{}, nil
 }
 
 func (p *plugin) PostCreateContainer(ctx context.Context, pod *api.PodSandbox, ctr *api.Container) error {
