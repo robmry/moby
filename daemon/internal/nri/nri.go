@@ -30,10 +30,10 @@ const (
 )
 
 type NRI struct {
-	cfg Config
-
-	// mu protects nri - read lock for container operations, write lock for sync and shutdown.
+	// mu protects cfg and nri
+	// Read lock for container operations, write lock for sync, config update and shutdown.
 	mu  sync.RWMutex
+	cfg Config
 	nri *adaptation.Adaptation
 }
 
@@ -83,6 +83,41 @@ func (n *NRI) Shutdown(ctx context.Context) {
 	log.G(ctx).Info("Shutting down NRI")
 	n.nri.Stop()
 	n.nri = nil
+}
+
+func (n *NRI) PrepareReload(ctx context.Context, nriCfg opts.NRIOpts) (func() error, error) {
+	var newNRI *adaptation.Adaptation
+	newCfg := n.cfg
+	newCfg.DaemonConfig = nriCfg
+	if err := setDefaultPaths(&newCfg.DaemonConfig); err != nil {
+		return nil, err
+	}
+
+	if nriCfg.Enable {
+		var err error
+		newNRI, err = adaptation.New("docker", dockerversion.Version, n.syncFn, n.updateFn, nriOptions(newCfg.DaemonConfig)...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return func() error {
+		n.mu.Lock()
+		if n.nri != nil {
+			log.G(ctx).Info("Shutting down old NRI instance")
+			n.nri.Stop()
+		}
+		n.cfg = newCfg
+		n.nri = newNRI
+		// Release the lock before starting newNRI, because it'll call back to syncFn
+		// which will acquire the lock.
+		n.mu.Unlock()
+
+		if newNRI == nil {
+			return nil
+		}
+		return newNRI.Start()
+	}, nil
 }
 
 func (n *NRI) CreateContainer(ctx context.Context, ctr *container.Container) error {
