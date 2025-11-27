@@ -71,6 +71,7 @@ func (tx *reloadTxn) Rollback() error {
 // - Insecure registries
 // - Registry mirrors
 // - Daemon live restore
+// - NRI enable and filesystem locations
 func (daemon *Daemon) Reload(conf *config.Config) error {
 	daemon.configReload.Lock()
 	defer daemon.configReload.Unlock()
@@ -107,6 +108,7 @@ func (daemon *Daemon) Reload(conf *config.Config) error {
 		daemon.reloadRegistryConfig,
 		daemon.reloadLiveRestore,
 		daemon.reloadNetworkDiagnosticPort,
+		daemon.reloadNRI,
 	} {
 		if err := reload(&txn, newCfg, conf, attributes); err != nil {
 			return errors.Join(err, txn.Rollback())
@@ -274,5 +276,44 @@ func (daemon *Daemon) reloadFeatures(txn *reloadTxn, newCfg *configStore, conf *
 
 	// prepare reload event attributes with updatable configurations
 	attributes["features"] = fmt.Sprintf("%v", newCfg.Features)
+	return nil
+}
+
+// reloadNRI updates NRI configuration
+func (daemon *Daemon) reloadNRI(txn *reloadTxn, newCfg *configStore, conf *config.Config, attributes map[string]string) error {
+	// Start with default configuration.
+	newCfg.NRI = config.NRIConfig{
+		PluginPath:       config.NRIDefaultPluginPath,
+		PluginConfigPath: config.NRIDefaultPluginConfigPath,
+	}
+	// Update anything that's been explicitly configured.
+	if conf.IsValueSet("nri-enable") {
+		newCfg.Config.NRI.Enable = conf.NRI.Enable
+	}
+	if conf.IsValueSet("nri-plugin-path") {
+		newCfg.Config.NRI.PluginPath = conf.NRI.PluginPath
+	}
+	if conf.IsValueSet("nri-plugin-config-path") {
+		newCfg.Config.NRI.PluginConfigPath = conf.NRI.PluginConfigPath
+	}
+	if conf.IsValueSet("nri-socket") {
+		newCfg.Config.NRI.SocketPath = conf.NRI.SocketPath
+	}
+
+	commit, err := daemon.nri.PrepareReload(context.TODO(), newCfg.NRI)
+	if err != nil {
+		return err
+	}
+	if commit != nil {
+		txn.OnCommit(func() error {
+			return commit()
+		})
+	}
+
+	// prepare reload event attributes with updatable configurations
+	attributes["nri-enable"] = strconv.FormatBool(newCfg.NRI.Enable)
+	attributes["nri-plugin-path"] = newCfg.NRI.PluginPath
+	attributes["nri-plugin-config"] = newCfg.NRI.PluginConfigPath
+	attributes["nri-socket-path"] = newCfg.NRI.SocketPath
 	return nil
 }

@@ -69,6 +69,38 @@ func (n *NRI) Shutdown(ctx context.Context) {
 	n.nri.Stop()
 }
 
+func (n *NRI) PrepareReload(ctx context.Context, nriCfg config.NRIConfig) (func() error, error) {
+	var newNRI *adaptation.Adaptation
+	newCfg := n.Config
+	newCfg.DaemonConfig = nriCfg
+
+	if nriCfg.Enable {
+		var err error
+		newNRI, err = adaptation.New("docker", dockerversion.Version, n.syncFn, n.updateFn, nriOptions(newCfg.DaemonConfig)...)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return func() error {
+		n.mu.Lock()
+		if n.nri != nil {
+			log.G(ctx).Info("Shutting down old NRI instance")
+			n.nri.Stop()
+		}
+		n.Config = newCfg
+		n.nri = newNRI
+		// Release the lock before starting newNRI, because it'll call back to syncFn
+		// which will acquire the lock.
+		n.mu.Unlock()
+
+		if newNRI == nil {
+			return nil
+		}
+		return newNRI.Start()
+	}, nil
+}
+
 func (n *NRI) CreateContainer(ctx context.Context, ctr *container.Container) error {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
