@@ -14,6 +14,7 @@ import (
 	"github.com/moby/moby/v2/daemon/container"
 	"github.com/moby/moby/v2/daemon/internal/rootless"
 	"github.com/moby/moby/v2/daemon/pkg/opts"
+	"github.com/moby/moby/v2/daemon/volume/mounts"
 	"github.com/moby/moby/v2/dockerversion"
 	"github.com/moby/moby/v2/pkg/homedir"
 )
@@ -225,7 +226,7 @@ func containerToNRI(ctr *container.Container) (*adaptation.PodSandbox, *adaptati
 			SeccompProfile: nil,
 			SeccompPolicy:  nil,
 		},
-		Mounts:        nil,
+		Mounts:        mountPointsToNRI(ctr.MountPoints),
 		Pid:           uint32(ctr.Pid),
 		Rlimits:       nil,
 		CreatedAt:     0,
@@ -251,6 +252,22 @@ func stateToNRI(state *container.State) adaptation.ContainerState {
 	// CONTAINER_CREATED will be used before the container is started, including for the
 	// CreateContainer hook (during container creation).
 	return adaptation.ContainerState_CONTAINER_CREATED
+}
+
+func mountPointsToNRI(ctrMPs map[string]*mounts.MountPoint) []*adaptation.Mount {
+	if len(ctrMPs) == 0 {
+		return nil
+	}
+	nriMPs := make([]*adaptation.Mount, 0, len(ctrMPs))
+	for _, mp := range ctrMPs {
+		nriMPs = append(nriMPs, &adaptation.Mount{
+			Destination: mp.Destination,
+			Type:        string(mp.Type),
+			Source:      mp.Source,
+			Options:     nil, // TODO(robmry)
+		})
+	}
+	return nriMPs
 }
 
 func applyAdjustments(ctx context.Context, ctr *container.Container, adj *adaptation.ContainerAdjustment) error {
