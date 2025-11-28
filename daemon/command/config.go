@@ -79,6 +79,11 @@ func installCommonConfigFlags(conf *config.Config, flags *pflag.FlagSet) {
 
 	flags.Var(opts.NewNamedListOptsRef("cdi-spec-dirs", &conf.CDISpecDirs, nil), "cdi-spec-dir", "CDI specification directories to use")
 
+	flags.BoolVar(&conf.NRI.Enable, "nri-enable", false, "Enable NRI (Node Resource Interface)")
+	flags.StringVar(&conf.NRI.PluginPath, "nri-plugin-path", config.NRIDefaultPluginPath, "Directory containing NRI plugins")
+	flags.StringVar(&conf.NRI.PluginConfigPath, "nri-plugin-config-path", config.NRIDefaultPluginConfigPath, "Directory containing NRI plugin configuration")
+	flags.StringVar(&conf.NRI.SocketPath, "nri-socket-path", "", "Location of Docker's NRI socket")
+
 	// Deprecated flags / options
 	flags.BoolVarP(&conf.AutoRestart, "restart", "r", true, "--restart on the daemon has been deprecated in favor of --restart policies on docker run")
 	_ = flags.MarkDeprecated("restart", "Please use a restart policy on docker run")

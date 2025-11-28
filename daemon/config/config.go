@@ -74,6 +74,12 @@ const (
 	// LibnetDataPath is the path to libnetwork's data directory, relative to cfg.Root.
 	// Windows tolerates the "/".
 	LibnetDataPath = "network/files"
+	// NRIDefaultPluginPath is the default location for NRI plugins.
+	//
+	// FIXME(robmry) - is there a better place?
+	NRIDefaultPluginPath = "/opt/docker/nri/plugins"
+	// NRIDefaultPluginConfigPath is the default location for NRI plugin config.
+	NRIDefaultPluginConfigPath = "/etc/docker/nri/conf.d"
 )
 
 // flatOptions contains configuration keys
@@ -284,6 +290,9 @@ type CommonConfig struct {
 	// CDISpecDirs is a list of directories in which CDI specifications can be found.
 	CDISpecDirs []string `json:"cdi-spec-dirs,omitempty"`
 
+	// NRI defines an enable flag and paths for NRI (Node Resource Interface).
+	NRI NRIConfig `json:"nri,omitempty"`
+
 	// The minimum API version provided by the daemon. Defaults to [defaultMinAPIVersion].
 	//
 	// The DOCKER_MIN_API_VERSION allows overriding the minimum API version within
@@ -305,6 +314,14 @@ type DaemonLogConfig struct {
 	LogLevel  string           `json:"log-level,omitempty"`
 	LogFormat log.OutputFormat `json:"log-format,omitempty"`
 	RawLogs   bool             `json:"raw-logs,omitempty"`
+}
+
+// NRIConfig holds NRI configuration options.
+type NRIConfig struct {
+	Enable           bool   `json:"nri-enable,omitempty"`
+	PluginPath       string `json:"nri-plugin-path,omitempty"`
+	PluginConfigPath string `json:"nri-plugin-config-path,omitempty"`
+	SocketPath       string `json:"nri-socket-path,omitempty"`
 }
 
 // Proxies holds the proxies that are configured for the daemon.
