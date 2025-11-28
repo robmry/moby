@@ -167,7 +167,7 @@ func containerToNRI(ctr *container.Container) (*adaptation.PodSandbox, *adaptati
 		Id:           ctr.ID,
 		PodSandboxId: ctr.ID,
 		Name:         ctr.Name,
-		State:        adaptation.ContainerState_CONTAINER_UNKNOWN,
+		State:        stateToNRI(ctr.State),
 		Labels:       ctr.Config.Labels,
 		Annotations:  ctr.HostConfig.Annotations,
 		Args:         ctr.Config.Cmd,
@@ -195,6 +195,18 @@ func containerToNRI(ctr *container.Container) (*adaptation.PodSandbox, *adaptati
 		CDIDevices:    nil,
 	}
 	return nriPod, nriCtr, nil
+}
+
+func stateToNRI(state *container.State) adaptation.ContainerState {
+	switch {
+	case state.Paused, state.Restarting:
+		return adaptation.ContainerState_CONTAINER_PAUSED
+	case state.Running:
+		return adaptation.ContainerState_CONTAINER_RUNNING
+	case !state.FinishedAt.IsZero():
+		return adaptation.ContainerState_CONTAINER_EXITED
+	}
+	return adaptation.ContainerState_CONTAINER_STOPPED
 }
 
 func applyAdjustments(ctx context.Context, ctr *container.Container, adj *adaptation.ContainerAdjustment) error {
