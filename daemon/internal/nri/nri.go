@@ -12,6 +12,7 @@ import (
 	nrilog "github.com/containerd/nri/pkg/log"
 	"github.com/moby/moby/v2/daemon/config"
 	"github.com/moby/moby/v2/daemon/container"
+	"github.com/moby/moby/v2/daemon/volume/mounts"
 	"github.com/moby/moby/v2/dockerversion"
 )
 
@@ -183,7 +184,7 @@ func containerToNRI(ctr *container.Container) (*adaptation.PodSandbox, *adaptati
 			SeccompProfile: nil,
 			SeccompPolicy:  nil,
 		},
-		Mounts:        nil,
+		Mounts:        mountPointsToNRI(ctr.MountPoints),
 		Pid:           uint32(ctr.Pid),
 		Rlimits:       nil,
 		CreatedAt:     0,
@@ -207,6 +208,22 @@ func stateToNRI(state *container.State) adaptation.ContainerState {
 		return adaptation.ContainerState_CONTAINER_EXITED
 	}
 	return adaptation.ContainerState_CONTAINER_STOPPED
+}
+
+func mountPointsToNRI(ctrMPs map[string]*mounts.MountPoint) []*adaptation.Mount {
+	if len(ctrMPs) == 0 {
+		return nil
+	}
+	nriMPs := make([]*adaptation.Mount, 0, len(ctrMPs))
+	for _, mp := range ctrMPs {
+		nriMPs = append(nriMPs, &adaptation.Mount{
+			Destination: mp.Destination,
+			Type:        string(mp.Type),
+			Source:      mp.Source,
+			Options:     nil, // TODO(robmry)
+		})
+	}
+	return nriMPs
 }
 
 func applyAdjustments(ctx context.Context, ctr *container.Container, adj *adaptation.ContainerAdjustment) error {
